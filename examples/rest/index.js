@@ -1,189 +1,166 @@
 const express = require('express');
 const app = express();
 const wppconnect = require('@wppconnect-team/wppconnect');
-var Instancia; //variável que receberá o cliente para ser chamada em outras funções da lib
-//variable that the client will receive to be called in other lib functions
+const WEBHOOK_URL = 'https://afbdd0613524.ngrok-free.app/api/whatsappwebhook'; // substitua pela sua!
+const axios = require('axios');
 
-app.use(express.json()); //parser utizado para requisições via post,....parser used for requests via post,
+// Objeto para armazenar múltiplas instâncias, cada uma por sessão
+const instancias = {};
+
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.get('/getconnectionstatus', async function (req, res) {
-  console.log('Solicitou status de conexao');
-  console.log('Requested connection status');
+// Função para criar ou retornar uma instância existente
+async function getOrCreateSession(sessionName) {
+  if (instancias[sessionName]) {
+    return instancias[sessionName];
+  }
+  const client = await wppconnect.create({
+    session: sessionName,
+    catchQR: (base64Qr, asciiQR, attempts, urlCode) => {
+      console.log(`QR Code para sessão ${sessionName}:`);
+      console.log(asciiQR);
+    },
+    statusFind: (statusSession, session) => {
+      console.log(`Status da sessão ${session}: ${statusSession}`);
+    },
+    headless: true,
+    devtools: false,
+    useChrome: true,
+    debug: false,
+    logQR: true,
+    browserWS: '',
+    browserArgs: [''],
+    puppeteerOptions: {},
+    disableWelcome: false,
+    updatesLog: true,
+    autoClose: 60000,
+    tokenStore: 'file',
+    folderNameToken: './tokens',
+  });
+  // preciso de um log para o corpo da mensagem que esta sendo enviaada , e qual sessao esta enviando
 
-  var mensagemretorno = ''; //mensagem de retorno da requisição ... request return message
-  var sucesso = false; //Se houve sucesso na requisição ... If the request was successful
-  var return_object;
+  client.onMessage(async (message) => {
+    console.log(`Mensagem recebida na sessão ${sessionName}:`, message.content);
+    axios
+      .post(WEBHOOK_URL, {
+        event: 'received',
+        session: sessionName,
+        message,
+      })
+      .catch(console.error);
+  });
+  instancias[sessionName] = client;
+  return client;
+}
 
-  const executa = async () => {
-    if (typeof Instancia === 'object') {
-      // Validando se a lib está iniciada .... Validating if lib is started
-      mensagemretorno = await Instancia.getConnectionState(); // validadado o estado da conexão com o whats
-      //whats connection status validated
-      sucesso = true;
-    } else {
-      mensagemretorno =
-        'A instancia não foi inicializada - The instance was not initialized';
-    }
-    return_object = {
-      status: sucesso,
-      message: mensagemretorno,
-    };
-    res.send(return_object);
-  };
-  executa();
+// Endpoint para checar status de conexão de uma sessão
+app.get('/:session/getconnectionstatus', async function (req, res) {
+  const sessionName = req.params.session;
+  const client = await getOrCreateSession(sessionName);
+  let mensagemretorno = '';
+  let sucesso = false;
+  if (typeof client === 'object') {
+    mensagemretorno = await client.getConnectionState();
+    sucesso = true;
+  } else {
+    mensagemretorno =
+      'A instancia não foi inicializada - The instance was not initialized';
+  }
+  res.send({ status: sucesso, message: mensagemretorno });
 });
 
-app.post('/sendmessage', async function (req, res) {
-  console.log('Solicitou envio de mensagem VIA POST');
-  console.log('Requested sending VIA POST message');
+// Endpoint para enviar mensagem de texto
+app.post('/:session/sendmessage', async function (req, res) {
+  const sessionName = req.params.session;
+  const client = await getOrCreateSession(sessionName);
+  const telnumber = req.body.telnumber;
+  const mensagemparaenvio = req.body.message;
+  // Log da sessão e body da mensagem
+  console.log(`[ENVIANDO MENSAGEM] Sessão: ${sessionName} | Body:`, req.body);
+  let mensagemretorno = '';
+  let sucesso = false;
+  if (typeof client === 'object') {
+    const status = await client.getConnectionState();
+    if (status === 'CONNECTED') {
+      let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+      if (numeroexiste.canReceiveMessage === true) {
+        await client
+          .sendText(numeroexiste.id._serialized, mensagemparaenvio)
+          .then((result) => {
+            console.log('Result: ', result);
+            sucesso = true;
 
-  //parametros vindos na requisição ... parameters coming in the request
-  var telnumber = req.body.telnumber;
-  var mensagemparaenvio = req.body.message;
-  //***********/
+            mensagemretorno = result.id;
+            axios
+              .post(WEBHOOK_URL, {
+                event: 'sent',
+                session: sessionName,
+                telnumber,
+                message: mensagemparaenvio,
+                result,
+              })
+              .catch(console.error);
+          })
 
-  var mensagemretorno = ''; //mensagem de retorno da requisição ... request return message
-  var sucesso = false; //Se houve sucesso na requisição ... If the request was successful
-  var return_object;
-
-  const executa = async () => {
-    if (typeof Instancia === 'object') {
-      // Validando se a lib está iniciada .... Validating if lib is started
-      status = await Instancia.getConnectionState(); // validadado o estado da conexão com o whats
-      //whats connection status validated
-      if (status === 'CONNECTED') {
-        let numeroexiste = await Instancia.checkNumberStatus(
-          telnumber + '@c.us'
-        ); //Validando se o número existe ... Validating if the number exists
-        if (numeroexiste.canReceiveMessage === true) {
-          await Instancia.sendText(
-            numeroexiste.id._serialized,
-            mensagemparaenvio
-          )
-            .then((result) => {
-              console.log('Result: ', result); //return object success
-              sucesso = true;
-              mensagemretorno = result.id;
-            })
-            .catch((erro) => {
-              console.error('Error when sending: ', erro); //return object error
-            });
-        } else {
-          mensagemretorno =
-            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
-        }
+          .catch((erro) => {
+            console.error('Error when sending: ', erro);
+          });
       } else {
         mensagemretorno =
-          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
+          'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
       }
     } else {
       mensagemretorno =
-        'A instancia não foi inicializada - The instance was not initialized';
+        'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
     }
-    return_object = {
-      status: sucesso,
-      message: mensagemretorno,
-    };
-    res.send(return_object);
-  };
-  executa();
+  } else {
+    mensagemretorno =
+      'A instancia não foi inicializada - The instance was not initialized';
+  }
+  res.send({ status: sucesso, message: mensagemretorno });
 });
 
-app.post('/sendpixmessage', async function (req, res) {
-  console.log('Solicitou envio de mensagem VIA POST');
-  console.log('Requested sending VIA POST message');
-
-  //parametros vindos na requisição ... parameters coming in the request
-  var telnumber = req.body.telnumber;
-  var params = req.body.params;
-  var options = req.body.options;
-  //***********/
-
-  var mensagemretorno = ''; //mensagem de retorno da requisição ... request return message
-  var sucesso = false; //Se houve sucesso na requisição ... If the request was successful
-  var return_object;
-
-  const executa = async () => {
-    if (typeof Instancia === 'object') {
-      // Validando se a lib está iniciada .... Validating if lib is started
-      status = await Instancia.getConnectionState(); // validadado o estado da conexão com o whats
-      //whats connection status validated
-      if (status === 'CONNECTED') {
-        let numeroexiste = await Instancia.checkNumberStatus(
-          telnumber + '@c.us'
-        ); //Validando se o número existe ... Validating if the number exists
-        if (numeroexiste.canReceiveMessage === true) {
-          await Instancia.sendPix(numeroexiste.id._serialized, params, options)
-            .then((result) => {
-              console.log('Result: ', result); //return object success
-              sucesso = true;
-              mensagemretorno = result.id;
-            })
-            .catch((erro) => {
-              console.error('Error when sending: ', erro); //return object error
-            });
-        } else {
-          mensagemretorno =
-            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
-        }
+// Endpoint para enviar mensagem PIX (mantido do original)
+app.post('/:session/sendpixmessage', async function (req, res) {
+  const sessionName = req.params.session;
+  const client = await getOrCreateSession(sessionName);
+  const telnumber = req.body.telnumber;
+  const params = req.body.params;
+  const options = req.body.options;
+  let mensagemretorno = '';
+  let sucesso = false;
+  if (typeof client === 'object') {
+    const status = await client.getConnectionState();
+    if (status === 'CONNECTED') {
+      let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+      if (numeroexiste.canReceiveMessage === true) {
+        await client
+          .sendPix(numeroexiste.id._serialized, params, options)
+          .then((result) => {
+            sucesso = true;
+            mensagemretorno = result.id;
+          })
+          .catch((erro) => {
+            console.error('Error when sending: ', erro);
+          });
       } else {
         mensagemretorno =
-          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
+          'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
       }
     } else {
       mensagemretorno =
-        'A instancia não foi inicializada - The instance was not initialized';
+        'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
     }
-    return_object = {
-      status: sucesso,
-      message: mensagemretorno,
-    };
-    res.send(return_object);
-  };
-  executa();
+  } else {
+    mensagemretorno =
+      'A instancia não foi inicializada - The instance was not initialized';
+  }
+  res.send({ status: sucesso, message: mensagemretorno });
 });
 
-startWPP(); //chama a função para inicializar a lib...... call function to initialize the lib
-
-async function startWPP() {
-  await wppconnect
-    .create({
-      session: 'teste',
-      catchQR: (base64Qr, asciiQR, attempts, urlCode) => {},
-      statusFind: (statusSession, session) => {
-        console.log('Status Session: ', statusSession); //return isLogged || notLogged || browserClose || qrReadSuccess || qrReadFail || autocloseCalled || desconnectedMobile || deleteToken
-        //Create session wss return "serverClose" case server for close
-        console.log('Session name: ', session);
-      },
-      headless: true, // Headless chrome
-      devtools: false, // Open devtools by default
-      useChrome: true, // If false will use Chromium instance
-      debug: false, // Opens a debug session
-      logQR: true, // Logs QR automatically in terminal
-      browserWS: '', // If u want to use browserWSEndpoint
-      browserArgs: [''], // Parameters to be added into the chrome browser instance
-      puppeteerOptions: {}, // Will be passed to puppeteer.launch
-      disableWelcome: false, // Option to disable the welcoming message which appears in the beginning
-      updatesLog: true, // Logs info updates automatically in terminal
-      autoClose: 60000, // Automatically closes the wppconnect only when scanning the QR code (default 60 seconds, if you want to turn it off, assign 0 or false)
-      tokenStore: 'file', // Define how work with tokens, that can be a custom interface
-      folderNameToken: './tokens', //folder name when saving tokens
-    })
-    .then((client) => {
-      start(client);
-    })
-    .catch((erro) => console.log(erro));
-}
-
-async function start(client) {
-  Instancia = client; //Será utilizado nas requisições REST ..... It will be used in REST requests
-
-  client.onMessage(async (message) => {});
-  client.onAck((ack) => {});
-  client.onStateChange(async (state) => {});
-}
-
-const porta = '3000';
+// Não inicializa nenhuma sessão automaticamente
+// O servidor só inicia
+const porta = '3003';
 var server = app.listen(porta);
 console.log('Servidor iniciado na porta %s', server.address().port);

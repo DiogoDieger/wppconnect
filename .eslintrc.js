@@ -3,6 +3,10 @@ module.exports = {
   root: true,
   parser: '@typescript-eslint/parser',
   plugins: ['@typescript-eslint', 'header'],
+  env: {
+    node: true,
+    es6: true,
+  },
   extends: [
     'eslint:recommended',
     'plugin:@typescript-eslint/eslint-recommended',
@@ -27,29 +31,6 @@ module.exports = {
     'no-useless-catch': 'off',
     'no-useless-escape': 'off',
     'prefer-const': 'off',
-    'header/header': [
-      2,
-      'block',
-      [
-        '',
-        ' * This file is part of WPPConnect.',
-        ' *',
-        ' * WPPConnect is free software: you can redistribute it and/or modify',
-        ' * it under the terms of the GNU Lesser General Public License as published by',
-        ' * the Free Software Foundation, either version 3 of the License, or',
-        ' * (at your option) any later version.',
-        ' *',
-        ' * WPPConnect is distributed in the hope that it will be useful,',
-        ' * but WITHOUT ANY WARRANTY; without even the implied warranty of',
-        ' * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the',
-        ' * GNU Lesser General Public License for more details.',
-        ' *',
-        ' * You should have received a copy of the GNU Lesser General Public License',
-        ' * along with WPPConnect.  If not, see <https://www.gnu.org/licenses/>.',
-        ' ',
-      ],
-      1,
-    ],
     'prettier/prettier': [
       'error',
       {
@@ -71,7 +52,7 @@ module.exports = {
         commonjs: true,
         es6: true,
         browser: true,
-        node: false,
+        node: true,
       },
       globals: {
         axios: true,
