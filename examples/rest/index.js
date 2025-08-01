@@ -1,13 +1,60 @@
 const express = require('express');
 const app = express();
 const wppconnect = require('@wppconnect-team/wppconnect');
-const WEBHOOK_URL = 'http://localhost:3002/api/whatsappwebhook'; // substitua pela sua!
+const WEBHOOK_URL = 'http://localhost:3000/api/whatsappwebhook'; // substitua pela sua!
 const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
-// Objeto para armazenar múltiplas instâncias, cada uma por sessão
+
+const qrcodesTemp = {};
 const instancias = {};
+const sessionStatus = {}; // Para acompanhar o status de criação das sessões
+async function waitForQrCode(client, timeout = 15000, interval = 500) {
+  const started = Date.now();
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      if (client.qrCodeData && client.qrCodeData.base64Image) {
+        return resolve(client.qrCodeData);
+      }
+      if (Date.now() - started > timeout) {
+        return resolve(null); // não rejeita para lógica padrão
+      }
+      setTimeout(check, interval);
+    };
+    check();
+  });
+}
+
+// Função para limpar sessões antigas
+function cleanupSession(sessionName) {
+  try {
+    const sessionDir = path.join(__dirname, 'tokens', sessionName);
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      console.log(`Sessão ${sessionName} limpa`);
+    }
+  } catch (error) {
+    console.error(`Erro ao limpar sessão ${sessionName}:`, error);
+  }
+}
+
+// Configuração do CORS - deve vir antes de outros middlewares
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization'
+  );
+
+  // Responde imediatamente para requisições OPTIONS (preflight)
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -138,17 +185,197 @@ function processVideoMessage(message) {
     ack: message.ack,
   };
 }
+async function syncQrCodeState(sessionName, client) {
+  const state = await client.getConnectionState();
+  // Atualiza o estado atual dentro do cache, se já existir
+  if (qrcodesTemp[sessionName]) {
+    qrcodesTemp[sessionName].connectionState = state;
+  }
+}
+
+// Função para criar sessão em background
+async function createSessionInBackground(sessionName) {
+  try {
+    sessionStatus[sessionName] = {
+      status: 'creating',
+      message: 'Iniciando criação da sessão...',
+    };
+
+    cleanupSession(sessionName);
+
+    let qrCodeData = null;
+    let clientInstance = null;
+    let qrCodeDataTemp = null;
+    const QRCODE_LIFETIME = 40 * 1000;
+
+    const catchQR = (base64Qr, asciiQR, attempts, urlCode) => {
+      const expiresAt = Date.now() + QRCODE_LIFETIME;
+      const qr = {
+        base64Image: base64Qr,
+        urlCode: urlCode,
+        asciiQR: asciiQR,
+        attempts: attempts,
+        expiresAt,
+      };
+      qrcodesTemp[sessionName] = qr;
+      if (client) client.qrCodeData = qr;
+      sessionStatus[sessionName] = {
+        status: 'qr_ready',
+        message: 'QR Code gerado com sucesso',
+      };
+      console.log('QR Code capturado e armazenado');
+    };
+
+    const client = await wppconnect.create({
+      session: sessionName,
+      catchQR,
+      statusFind: (statusSession, session) => {
+        sessionStatus[sessionName] = {
+          status: 'QR_CODE',
+          message: `Status: ${statusSession}`,
+        };
+      },
+      headless: true,
+      devtools: false,
+      useChrome: true,
+      debug: false,
+      logQR: true,
+      browserWS: '',
+      browserArgs: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+        '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
+      ],
+      puppeteerOptions: {
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=TranslateUI',
+          '--disable-ipc-flooding-protection',
+        ],
+      },
+      disableWelcome: false,
+      updatesLog: true,
+      autoClose: 240000,
+      tokenStore: 'file',
+      folderNameToken: './tokens',
+    });
+
+    clientInstance = client;
+    client.qrCodeData = qrCodeData;
+
+    if (qrCodeDataTemp) client.qrCodeData = qrCodeDataTemp;
+
+    client.onMessage(async (message) => {
+      let processedMessage;
+
+      if (message.type === 'document') {
+        processedMessage = processDocumentMessage(message);
+        processedMessage.document.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`📄 Documento recebido na sessão ${sessionName}:`, {
+          arquivo: processedMessage.document.filename,
+          tamanho: processedMessage.document.size,
+          remetente: processedMessage.sender.name,
+        });
+      } else if (message.type === 'image') {
+        processedMessage = processImageMessage(message);
+        processedMessage.image.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`🖼️ Imagem recebida na sessão ${sessionName}:`, {
+          remetente: processedMessage.sender.name,
+        });
+      } else if (message.type === 'audio') {
+        processedMessage = processAudioMessage(message);
+        processedMessage.audio.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`🔊 Áudio recebido na sessão ${sessionName}:`, {
+          remetente: processedMessage.sender.name,
+        });
+      } else if (message.type === 'video') {
+        processedMessage = processVideoMessage(message);
+        processedMessage.video.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`🎥 Vídeo recebido na sessão ${sessionName}:`, {
+          remetente: processedMessage.sender.name,
+        });
+      } else {
+        processedMessage = processRegularMessage(message);
+        console.log(`💬 Mensagem recebida na sessão ${sessionName}:`, {
+          tipo: processedMessage.type,
+          corpo: processedMessage.body,
+          remetente: processedMessage.sender.name,
+        });
+      }
+
+      axios
+        .post(WEBHOOK_URL, {
+          event: 'received',
+          session: sessionName,
+          message: processedMessage,
+        })
+        .catch(console.error);
+    });
+
+    instancias[sessionName] = client;
+    sessionStatus[sessionName] = {
+      status: 'ready',
+      message: 'Sessão criada com sucesso',
+    };
+    console.log(`Sessão ${sessionName} criada com sucesso em background`);
+
+    return client;
+  } catch (error) {
+    sessionStatus[sessionName] = { status: 'error', message: error.message };
+    console.error(`Erro ao criar sessão ${sessionName}:`, error);
+    throw error;
+  }
+}
 
 // Função para criar ou retornar uma instância existente
 async function getOrCreateSession(sessionName) {
   if (instancias[sessionName]) {
+    console.log(`Sessão ${sessionName} já existe!`);
     return instancias[sessionName];
   }
+
+  cleanupSession(sessionName);
+
+  let qrCodeData = null;
+  let clientInstance = null;
+  let qrCodeDataTemp = null;
+  const QRCODE_LIFETIME = 40 * 1000;
+  const catchQR = (base64Qr, asciiQR, attempts, urlCode) => {
+    const expiresAt = Date.now() + QRCODE_LIFETIME;
+    const qr = {
+      base64Image: base64Qr,
+      urlCode: urlCode,
+      asciiQR: asciiQR,
+      attempts: attempts,
+      expiresAt,
+    };
+    qrcodesTemp[sessionName] = qr; // <--- Salva no cache global
+    if (client) client.qrCodeData = qr;
+    console.log('QR Code capturado e armazenado');
+  };
+
   const client = await wppconnect.create({
     session: sessionName,
-    catchQR: (base64Qr, asciiQR, attempts, urlCode) => {
-      console.log(asciiQR);
-    },
+    catchQR,
     statusFind: (statusSession, session) => {},
     headless: true,
     devtools: false,
@@ -156,14 +383,50 @@ async function getOrCreateSession(sessionName) {
     debug: false,
     logQR: true,
     browserWS: '',
-    browserArgs: [''],
-    puppeteerOptions: {},
+    browserArgs: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-features=TranslateUI',
+      '--disable-ipc-flooding-protection',
+      '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
+    ],
+    puppeteerOptions: {
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-ipc-flooding-protection',
+      ],
+    },
     disableWelcome: false,
     updatesLog: true,
-    autoClose: 60000,
+    autoClose: 240000,
     tokenStore: 'file',
     folderNameToken: './tokens',
   });
+
+  // Atualiza a referência do cliente e adiciona o QR code
+  clientInstance = client;
+  client.qrCodeData = qrCodeData;
+
+  // Se o QR code foi capturado durante a criação, atribui ao cliente
+  if (qrCodeDataTemp) client.qrCodeData = qrCodeDataTemp;
 
   client.onMessage(async (message) => {
     let processedMessage;
@@ -302,20 +565,291 @@ app.get('/:session/downloadmedia/:messageId', async function (req, res) {
   }
 });
 
-// Endpoint para checar status de conexão de uma sessão
+// Endpoint para criar nova sessão e obter QR code ou status de conexão
 app.get('/:session/getconnectionstatus', async function (req, res) {
   const sessionName = req.params.session;
-  const client = await getOrCreateSession(sessionName);
   let mensagemretorno = '';
   let sucesso = false;
-  if (typeof client === 'object') {
-    mensagemretorno = await client.getConnectionState();
-    sucesso = true;
-  } else {
-    mensagemretorno =
-      'A instancia não foi inicializada - The instance was not initialized';
+  let qrcode = null;
+  let connectionState = null;
+
+  // Se a sessão está sendo criada em background
+  if (
+    sessionStatus[sessionName] &&
+    sessionStatus[sessionName].status === 'creating'
+  ) {
+    return res.send({
+      status: true,
+      message: 'Sessão sendo criada em background',
+      connectionState: 'CREATING',
+      qrcode: null,
+    });
   }
-  res.send({ status: sucesso, message: mensagemretorno });
+
+  // Se a sessão está pronta mas ainda não foi inicializada
+  if (
+    sessionStatus[sessionName] &&
+    sessionStatus[sessionName].status === 'qr_ready'
+  ) {
+    if (qrcodesTemp[sessionName] && qrcodesTemp[sessionName].base64Image) {
+      return res.send({
+        status: true,
+        message: 'QR Code disponível',
+        connectionState: 'QRCODE',
+        qrcode: qrcodesTemp[sessionName],
+      });
+    }
+  }
+
+  // Se a sessão já existe
+  if (instancias[sessionName]) {
+    const client = instancias[sessionName];
+    connectionState = await client.getConnectionState();
+    sucesso = true;
+
+    if (connectionState === 'QRCODE') {
+      await syncQrCodeState(sessionName, client);
+      // Primeiro tenta usar o QR code armazenado durante a criação
+      if (client.qrCodeData && client.qrCodeData.base64Image) {
+        qrcode = {
+          base64Image: client.qrCodeData.base64Image,
+          urlCode: client.qrCodeData.urlCode,
+          asciiQR: client.qrCodeData.asciiQR,
+          attempts: client.qrCodeData.attempts,
+        };
+        mensagemretorno = 'QR Code gerado com sucesso';
+      } else {
+        // Se não tiver o QR code armazenado, tenta obter via getQrCode()
+        try {
+          const qrData = await client.getQrCode();
+          if (qrData && qrData.base64Image) {
+            qrcode = {
+              base64Image: qrData.base64Image,
+              urlCode: qrData.urlCode,
+            };
+            mensagemretorno = 'QR Code gerado com sucesso';
+          } else {
+            mensagemretorno = 'QR Code não disponível no momento';
+          }
+        } catch (error) {
+          console.error('Erro ao obter QR code:', error);
+          mensagemretorno = 'Erro ao gerar QR Code';
+        }
+      }
+    } else {
+      mensagemretorno = connectionState;
+    }
+  } else {
+    // Se a sessão não existe, inicia a criação em background
+    console.log(`Iniciando criação da sessão ${sessionName} em background...`);
+    createSessionInBackground(sessionName).catch((error) => {
+      console.error(
+        `Erro na criação em background da sessão ${sessionName}:`,
+        error
+      );
+    });
+
+    return res.send({
+      status: true,
+      message: 'Iniciando criação da sessão em background',
+      connectionState: 'CREATING',
+      qrcode: null,
+    });
+  }
+
+  await syncQrCodeState(sessionName, instancias[sessionName]);
+  res.send({
+    status: sucesso,
+    message: mensagemretorno,
+    connectionState: connectionState,
+    qrcode: qrcode,
+  });
+});
+
+// Endpoint específico para criar uma nova sessão
+app.post('/:session/createsession', async function (req, res) {
+  const sessionName = req.params.session;
+
+  try {
+    if (instancias[sessionName]) {
+      return res.send({
+        status: true,
+        message: 'Sessão já existe',
+        session: sessionName,
+        connectionState: 'CONNECTED',
+      });
+    }
+
+    if (
+      sessionStatus[sessionName] &&
+      sessionStatus[sessionName].status === 'creating'
+    ) {
+      return res.send({
+        status: true,
+        message: 'Sessão já está sendo criada',
+        session: sessionName,
+        connectionState: 'CREATING',
+      });
+    }
+
+    console.log(`Iniciando criação da sessão ${sessionName} em background...`);
+
+    // Inicia a criação em background
+    createSessionInBackground(sessionName).catch((error) => {
+      console.error(
+        `Erro na criação em background da sessão ${sessionName}:`,
+        error
+      );
+    });
+
+    // Retorna imediatamente
+    res.send({
+      status: true,
+      message: 'Criação da sessão iniciada em background',
+      session: sessionName,
+      connectionState: 'CREATING',
+    });
+  } catch (error) {
+    console.error('Erro ao iniciar criação da sessão:', error);
+    res.status(500).send({
+      status: false,
+      message: 'Erro interno do servidor',
+      error: error.message,
+      session: sessionName,
+    });
+  }
+});
+
+// Endpoint para verificar o status da criação da sessão
+app.get('/:session/status', async function (req, res) {
+  const sessionName = req.params.session;
+
+  try {
+    // Se a sessão já existe, retorna o status atual
+    if (instancias[sessionName]) {
+      const connectionState = await instancias[
+        sessionName
+      ].getConnectionState();
+      return res.send({
+        status: true,
+        message: 'Sessão ativa',
+        session: sessionName,
+        connectionState: connectionState,
+        sessionStatus: 'ready',
+      });
+    }
+
+    // Se está sendo criada, retorna o status da criação
+    if (sessionStatus[sessionName]) {
+      return res.send({
+        status: true,
+        message: sessionStatus[sessionName].message,
+        session: sessionName,
+        connectionState: sessionStatus[sessionName].status.toUpperCase(),
+        sessionStatus: sessionStatus[sessionName].status,
+      });
+    }
+
+    // Se não existe nem está sendo criada
+    res.status(404).send({
+      status: false,
+      message: 'Sessão não encontrada',
+      session: sessionName,
+    });
+  } catch (error) {
+    console.error('Erro ao verificar status da sessão:', error);
+    res.status(500).send({
+      status: false,
+      message: 'Erro interno do servidor',
+      error: error.message,
+      session: sessionName,
+    });
+  }
+});
+
+// Endpoint para obter QR code de uma sessão
+app.get('/:session/getqrcode', async function (req, res) {
+  const sessionName = req.params.session;
+
+  // 1. Primeiro tenta pelo cache global (mesmo antes do client existir)
+  if (qrcodesTemp[sessionName] && qrcodesTemp[sessionName].base64Image) {
+    return res.send({
+      status: true,
+      message: 'QR Code obtido do cache temp com sucesso',
+      session: sessionName,
+      connectionState: 'QRCODE',
+      qrcode: qrcodesTemp[sessionName],
+    });
+  }
+
+  // 2. Se não, tenta pelo client (quando já estiver inicializado)
+  const client = instancias[sessionName];
+  if (client) {
+    const connectionState = await client.getConnectionState();
+    if (connectionState === 'QRCODE') {
+      if (client.qrCodeData && client.qrCodeData.base64Image) {
+        return res.send({
+          status: true,
+          message: 'QR Code obtido do client',
+          session: sessionName,
+          connectionState,
+          qrcode: client.qrCodeData,
+        });
+      }
+    }
+    return res.send({
+      status: false,
+      message: `QRCODE. Estado atual: ${connectionState}`,
+      session: sessionName,
+      connectionState,
+    });
+  }
+
+  // 3. Se não tem nada ainda...
+  res.status(404).send({
+    status: false,
+    message: 'QR Code não disponível ou sessão ainda sendo criada',
+    session: sessionName,
+  });
+});
+
+// Endpoint para limpar uma sessão
+app.delete('/:session/cleansession', async function (req, res) {
+  const sessionName = req.params.session;
+
+  try {
+    // Fecha a instância se existir
+    if (instancias[sessionName]) {
+      try {
+        await instancias[sessionName].close();
+        console.log(`Instância ${sessionName} fechada`);
+      } catch (error) {
+        console.error(`Erro ao fechar instância ${sessionName}:`, error);
+      }
+      delete instancias[sessionName];
+    }
+
+    // Limpa os arquivos da sessão
+    cleanupSession(sessionName);
+
+    // Limpa o status da sessão
+    delete sessionStatus[sessionName];
+    delete qrcodesTemp[sessionName];
+
+    res.send({
+      status: true,
+      message: `Sessão ${sessionName} limpa com sucesso`,
+      session: sessionName,
+    });
+  } catch (error) {
+    console.error('Erro ao limpar sessão:', error);
+    res.status(500).send({
+      status: false,
+      message: 'Erro interno do servidor',
+      error: error.message,
+      session: sessionName,
+    });
+  }
 });
 
 // Endpoint para enviar mensagem de texto
