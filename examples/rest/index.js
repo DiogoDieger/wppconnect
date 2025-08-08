@@ -1171,6 +1171,353 @@ app.get('/:session/mediainfo/:messageId', async function (req, res) {
   }
 });
 
+// Variáveis globais para controle de fila
+const campaignQueue = new Map(); // Armazena as filas de campanhas
+const activeCampaigns = new Set(); // Controla campanhas ativas
+
+// Função para processar uma mensagem de template
+async function processTemplateMessage(client, contact, message, sessionName) {
+  try {
+    const status = await client.getConnectionState();
+    if (status !== 'CONNECTED') {
+      throw new Error('Cliente não conectado');
+    }
+
+    // Verifica se o número existe
+    const numberStatus = await client.checkNumberStatus(contact + '@c.us');
+    if (!numberStatus.canReceiveMessage) {
+      throw new Error('Número não disponível ou bloqueado');
+    }
+
+    let result;
+
+    // Processa diferentes tipos de mensagem
+    if (message.audioUrl) {
+      // Envia áudio
+      result = await client.sendPtt(
+        numberStatus.id._serialized,
+        message.audioUrl
+      );
+    } else if (message.imageUrl) {
+      // Envia imagem
+      const filename = message.imageUrl.split('/').pop() || 'imagem.jpg';
+      result = await client.sendImage(
+        numberStatus.id._serialized,
+        message.imageUrl,
+        filename,
+        message.text
+      );
+    } else if (message.documentUrl) {
+      // Envia documento
+      const filename = message.documentUrl.split('/').pop() || 'documento';
+      result = await client.sendFile(
+        numberStatus.id._serialized,
+        message.documentUrl,
+        filename,
+        message.text
+      );
+    } else {
+      // Envia texto simples
+      result = await client.sendText(numberStatus.id._serialized, message.text);
+    }
+
+    console.log(`✅ Mensagem enviada para ${contact}: ${message.text}`);
+    return {
+      success: true,
+      messageId: result.id,
+      contact,
+      message: message.text,
+    };
+  } catch (error) {
+    console.error(`❌ Erro ao enviar mensagem para ${contact}:`, error.message);
+    return {
+      success: false,
+      error: error.message,
+      contact,
+      message: message.text,
+    };
+  }
+}
+
+// Função para processar um template para um contato
+async function processTemplateForContact(
+  client,
+  contact,
+  template,
+  sessionName,
+  campaignId
+) {
+  const results = [];
+
+  for (const message of template.messages) {
+    // Aguarda 5 segundos entre mensagens do template
+    if (results.length > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+
+    const result = await processTemplateMessage(
+      client,
+      contact,
+      message,
+      sessionName
+    );
+    results.push(result);
+
+    // Atualiza o progresso da campanha
+    updateCampaignProgress(campaignId, contact, result);
+  }
+
+  return results;
+}
+
+// Função para atualizar o progresso da campanha
+function updateCampaignProgress(campaignId, contact, result) {
+  if (!campaignQueue.has(campaignId)) return;
+
+  const campaign = campaignQueue.get(campaignId);
+  campaign.processedContacts++;
+  campaign.results.push(result);
+
+  console.log(
+    `📊 Campanha ${campaignId}: ${campaign.processedContacts}/${campaign.totalContacts} contatos processados`
+  );
+}
+
+// Função para processar campanha em background
+async function processCampaignInBackground(
+  campaignId,
+  sessionName,
+  campaign,
+  templates,
+  contacts
+) {
+  try {
+    console.log(
+      `🚀 Iniciando campanha ${campaignId} para ${contacts.length} contatos`
+    );
+
+    const client = await getOrCreateSession(sessionName);
+    if (!client) {
+      throw new Error('Falha ao criar sessão');
+    }
+
+    // Inicializa a campanha na fila
+    campaignQueue.set(campaignId, {
+      status: 'running',
+      totalContacts: contacts.length,
+      processedContacts: 0,
+      results: [],
+      startTime: new Date(),
+      templates,
+      contacts,
+    });
+
+    activeCampaigns.add(campaignId);
+
+    for (let i = 0; i < contacts.length; i++) {
+      const contact = contacts[i];
+
+      // Verifica se a campanha foi cancelada
+      if (!activeCampaigns.has(campaignId)) {
+        console.log(`⏹️ Campanha ${campaignId} cancelada`);
+        break;
+      }
+
+      console.log(
+        `📞 Processando contato ${i + 1}/${contacts.length}: ${contact}`
+      );
+
+      // Processa todos os templates para este contato
+      for (const template of templates) {
+        try {
+          await processTemplateForContact(
+            client,
+            contact,
+            template,
+            sessionName,
+            campaignId
+          );
+        } catch (error) {
+          console.error(
+            `❌ Erro ao processar template para ${contact}:`,
+            error
+          );
+          updateCampaignProgress(campaignId, contact, {
+            success: false,
+            error: error.message,
+            contact,
+          });
+        }
+      }
+
+      // Aguarda o delay da campanha entre contatos (exceto no último)
+      if (i < contacts.length - 1) {
+        console.log(
+          `⏳ Aguardando ${campaign.delay}ms antes do próximo contato...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, campaign.delay));
+      }
+    }
+
+    // Finaliza a campanha
+    const campaignData = campaignQueue.get(campaignId);
+    if (campaignData) {
+      campaignData.status = 'completed';
+      campaignData.endTime = new Date();
+      campaignData.duration = campaignData.endTime - campaignData.startTime;
+    }
+
+    activeCampaigns.delete(campaignId);
+    console.log(`✅ Campanha ${campaignId} finalizada com sucesso`);
+  } catch (error) {
+    console.error(`❌ Erro na campanha ${campaignId}:`, error);
+
+    const campaignData = campaignQueue.get(campaignId);
+    if (campaignData) {
+      campaignData.status = 'error';
+      campaignData.error = error.message;
+    }
+
+    activeCampaigns.delete(campaignId);
+  }
+}
+
+// Endpoint para disparar campanha
+app.post('/:session/dispatch-campaign', async function (req, res) {
+  const sessionName = req.params.session;
+  const { campaign, templates, contacts } = req.body;
+
+  if (
+    !campaign ||
+    !templates ||
+    !contacts ||
+    !Array.isArray(contacts) ||
+    contacts.length === 0
+  ) {
+    return res.status(400).send({
+      status: false,
+      message:
+        'Dados inválidos. Necessário: campaign, templates e contacts (array não vazio)',
+    });
+  }
+
+  // Gera ID único para a campanha
+  const campaignId = `campaign_${Date.now()}_${Math.random()
+    .toString(36)
+    .substr(2, 9)}`;
+
+  try {
+    // Inicia o processamento em background
+    processCampaignInBackground(
+      campaignId,
+      sessionName,
+      campaign,
+      templates,
+      contacts
+    );
+
+    res.send({
+      status: true,
+      message: 'Campanha iniciada com sucesso',
+      campaignId,
+      totalContacts: contacts.length,
+      totalTemplates: templates.length,
+      estimatedDuration: `${Math.ceil(
+        (contacts.length * templates.length * 5 +
+          contacts.length * campaign.delay) /
+          1000
+      )} segundos`,
+    });
+  } catch (error) {
+    console.error('Erro ao iniciar campanha:', error);
+    res.status(500).send({
+      status: false,
+      message: 'Erro interno do servidor',
+      error: error.message,
+    });
+  }
+});
+
+// Endpoint para verificar status da campanha
+app.get('/campaign/:campaignId/status', async function (req, res) {
+  const campaignId = req.params.campaignId;
+
+  const campaignData = campaignQueue.get(campaignId);
+  if (!campaignData) {
+    return res.status(404).send({
+      status: false,
+      message: 'Campanha não encontrada',
+    });
+  }
+
+  const progress =
+    campaignData.totalContacts > 0
+      ? Math.round(
+          (campaignData.processedContacts / campaignData.totalContacts) * 100
+        )
+      : 0;
+
+  res.send({
+    status: true,
+    campaignId,
+    campaignStatus: campaignData.status,
+    progress,
+    processedContacts: campaignData.processedContacts,
+    totalContacts: campaignData.totalContacts,
+    results: campaignData.results,
+    startTime: campaignData.startTime,
+    endTime: campaignData.endTime,
+    duration: campaignData.duration,
+    error: campaignData.error,
+  });
+});
+
+// Endpoint para cancelar campanha
+app.delete('/campaign/:campaignId/cancel', async function (req, res) {
+  const campaignId = req.params.campaignId;
+
+  if (!activeCampaigns.has(campaignId)) {
+    return res.status(404).send({
+      status: false,
+      message: 'Campanha não encontrada ou já finalizada',
+    });
+  }
+
+  activeCampaigns.delete(campaignId);
+
+  const campaignData = campaignQueue.get(campaignId);
+  if (campaignData) {
+    campaignData.status = 'cancelled';
+    campaignData.endTime = new Date();
+  }
+
+  res.send({
+    status: true,
+    message: 'Campanha cancelada com sucesso',
+    campaignId,
+  });
+});
+
+// Endpoint para listar campanhas ativas
+app.get('/campaigns/active', async function (req, res) {
+  const activeCampaignsList = Array.from(activeCampaigns).map((campaignId) => {
+    const campaignData = campaignQueue.get(campaignId);
+    return {
+      campaignId,
+      status: campaignData?.status || 'unknown',
+      processedContacts: campaignData?.processedContacts || 0,
+      totalContacts: campaignData?.totalContacts || 0,
+      startTime: campaignData?.startTime,
+    };
+  });
+
+  res.send({
+    status: true,
+    activeCampaigns: activeCampaignsList,
+    totalActive: activeCampaigns.size,
+  });
+});
+
 const porta = '3003';
 var server = app
   .listen(porta, () => {
