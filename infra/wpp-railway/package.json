@@ -1,0 +1,10 @@
+{
+  "name": "wppconnect-on-railway",
+  "private": true,
+  "scripts": {
+    "start": "wppconnect-server"
+  },
+  "dependencies": {
+    "wppconnect-server": "^1.37.3"
+  }
+}

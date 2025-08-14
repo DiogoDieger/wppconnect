@@ -1,0 +1,17 @@
+{
+  "port": 3003,
+  "token": "troque-por-um-token-forte",
+  "jwtSecret": "troque-por-um-secret-forte",
+  "startAllSessions": true,
+  "webhook": {
+    "enabled": true,
+    "url": "https://SEU-CRM/api/whatsappwebhook",
+    "queue": false
+  },
+  "createOptions": {
+    "useChrome": true,
+    "headless": true,
+    "browserArgs": ["--no-sandbox", "--disable-setuid-sandbox"]
+  },
+  "sessionFolder": "/app/sessions"
+}
