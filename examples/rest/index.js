@@ -6,6 +6,7 @@ const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
 
 const qrcodesTemp = {};
 const instancias = {};
@@ -24,6 +25,29 @@ async function waitForQrCode(client, timeout = 15000, interval = 500) {
     };
     check();
   });
+}
+
+// ---- avatar cache (evita bater no WA toda hora)
+const avatarCache = new Map(); // key: jid, value: { url, ts }
+const AVATAR_TTL_MS = 10 * 60 * 1000; // 10 min
+
+async function safeGetAvatar(client, jid) {
+  if (!jid) return null;
+
+  const hit = avatarCache.get(jid);
+  if (hit && Date.now() - hit.ts < AVATAR_TTL_MS) return hit.url;
+
+  try {
+    // WPPConnect: tenta pegar a foto direto do servidor do WhatsApp
+    const url = await client.getProfilePicFromServer(jid);
+    const valid = typeof url === 'string' && url.startsWith('http');
+    const val = valid ? url : null;
+    avatarCache.set(jid, { url: val, ts: Date.now() });
+    return val;
+  } catch {
+    avatarCache.set(jid, { url: null, ts: Date.now() });
+    return null;
+  }
 }
 
 // Função para limpar sessões antigas
@@ -322,6 +346,44 @@ async function createSessionInBackground(sessionName) {
         });
       }
 
+      // --- ANEXAR FOTO DE PERFIL DO REMETENTE (e opcionalmente do grupo) ---
+      const jidForAvatar =
+        (message.sender && message.sender.id) || message.author || message.from;
+
+      // thumb que às vezes já vem no payload:
+      const thumb =
+        message.sender?.profilePicThumbObj?.eurl ||
+        message.sender?.profilePicUrl ||
+        null;
+
+      let avatarUrl = thumb;
+      if (!avatarUrl && jidForAvatar) {
+        avatarUrl = await safeGetAvatar(client, jidForAvatar);
+      }
+
+      // garante que processedMessage.sender existe
+      processedMessage.sender = processedMessage.sender || {
+        id: message.sender?.id,
+        name: message.sender?.name,
+        pushname: message.sender?.pushname,
+      };
+
+      if (avatarUrl) {
+        processedMessage.sender.profilePicUrl = avatarUrl;
+        console.log('[avatar] remetente', jidForAvatar, '→', avatarUrl);
+      }
+
+      // (opcional) se for grupo, pega a foto do grupo também
+      if (String(message.from || '').endsWith('@g.us')) {
+        const groupPic = await safeGetAvatar(client, message.from);
+        if (groupPic) {
+          processedMessage.chat = {
+            ...(processedMessage.chat || {}),
+            profilePicUrl: groupPic,
+          };
+        }
+      }
+
       axios
         .post(WEBHOOK_URL, {
           event: 'received',
@@ -469,6 +531,46 @@ async function getOrCreateSession(sessionName) {
         corpo: processedMessage.body,
         remetente: processedMessage.sender.name,
       });
+    }
+
+    const jidForAvatar =
+      (message.sender && message.sender.id) || message.author || message.from;
+
+    // thumb que às vezes já vem no payload:
+    const thumb =
+      message.sender?.profilePicThumbObj?.eurl ||
+      message.sender?.profilePicUrl ||
+      null;
+
+    let avatarUrl = thumb;
+    if (!avatarUrl && jidForAvatar) {
+      avatarUrl = await safeGetAvatar(client, jidForAvatar);
+    }
+
+    // garante que processedMessage.sender existe
+    processedMessage.sender = processedMessage.sender || {
+      id: message.sender?.id,
+      name: message.sender?.name,
+      pushname: message.sender?.pushname,
+    };
+
+    if (avatarUrl) {
+      processedMessage.sender.profilePicUrl = avatarUrl;
+      console.log('[avatar] remetente', jidForAvatar, '→', avatarUrl);
+    } else {
+      console.log('[avatar] remetente', jidForAvatar, '→ (sem foto)');
+    }
+
+    // (opcional) se for grupo, pega a foto do grupo também
+    if (String(message.from || '').endsWith('@g.us')) {
+      const groupPic = await safeGetAvatar(client, message.from);
+      if (groupPic) {
+        processedMessage.chat = {
+          ...(processedMessage.chat || {}),
+          profilePicUrl: groupPic,
+        };
+        console.log('[avatar] grupo', message.from, '→', groupPic);
+      }
     }
 
     // Envia para o webhook
@@ -721,44 +823,97 @@ app.post('/:session/createsession', async function (req, res) {
 });
 
 // Endpoint para verificar o status da criação da sessão
+
 app.get('/:session/status', async function (req, res) {
   const sessionName = req.params.session;
+  const reqId = randomUUID().slice(0, 8);
+  const t0 = process.hrtime.bigint();
+
+  const ip =
+    req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    'unknown';
+  const ua = req.get('user-agent') || 'unknown';
+
+  const hasInstance = !!instancias[sessionName];
+  const hasStatusObj = !!sessionStatus[sessionName];
+
+  const activeCount = Object.keys(instancias).length;
+  const statusCount = Object.keys(sessionStatus).length;
+
+  console.log(
+    `🛰️ [STATUS:${reqId}] GET /${encodeURIComponent(
+      sessionName
+    )}/status ip=${ip} ua="${ua}" hasInstance=${hasInstance} hasStatusObj=${hasStatusObj} active=${activeCount} creatingOrCached=${statusCount}`
+  );
 
   try {
-    // Se a sessão já existe, retorna o status atual
-    if (instancias[sessionName]) {
-      const connectionState = await instancias[
-        sessionName
-      ].getConnectionState();
+    // Sessão já existe
+    if (hasInstance) {
+      let connectionState = 'UNKNOWN';
+      try {
+        connectionState = await instancias[sessionName].getConnectionState();
+      } catch (e) {
+        console.error(
+          `⚠️ [STATUS:${reqId}] getConnectionState falhou: ${e?.message || e}`
+        );
+      }
+
+      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      console.log(
+        `✅ [STATUS:${reqId}] sessão encontrada state=${connectionState} (${ms.toFixed(
+          1
+        )}ms)`
+      );
+
       return res.send({
         status: true,
         message: 'Sessão ativa',
         session: sessionName,
-        connectionState: connectionState,
+        connectionState,
         sessionStatus: 'ready',
       });
     }
 
-    // Se está sendo criada, retorna o status da criação
-    if (sessionStatus[sessionName]) {
+    // Sessão em criação / cache de QR / etc.
+    if (hasStatusObj) {
+      const state = sessionStatus[sessionName].status;
+      const msg = sessionStatus[sessionName].message;
+      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+
+      console.log(
+        `⌛ [STATUS:${reqId}] sessão em andamento status=${state} msg="${msg}" (${ms.toFixed(
+          1
+        )}ms)`
+      );
+
       return res.send({
         status: true,
-        message: sessionStatus[sessionName].message,
+        message: msg,
         session: sessionName,
-        connectionState: sessionStatus[sessionName].status.toUpperCase(),
-        sessionStatus: sessionStatus[sessionName].status,
+        connectionState: state?.toUpperCase?.() || 'UNKNOWN',
+        sessionStatus: state || 'unknown',
       });
     }
 
-    // Se não existe nem está sendo criada
-    res.status(404).send({
+    // Sessão não existe
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    console.warn(
+      `❌ [STATUS:${reqId}] sessão NÃO encontrada "${sessionName}" (${ms.toFixed(
+        1
+      )}ms) active=${activeCount} creatingOrCached=${statusCount}`
+    );
+
+    return res.status(404).send({
       status: false,
       message: 'Sessão não encontrada',
       session: sessionName,
     });
   } catch (error) {
-    console.error('Erro ao verificar status da sessão:', error);
-    res.status(500).send({
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    console.error(`💥 [STATUS:${reqId}] erro (${ms.toFixed(1)}ms):`, error);
+
+    return res.status(500).send({
       status: false,
       message: 'Erro interno do servidor',
       error: error.message,
@@ -1518,6 +1673,142 @@ app.get('/campaigns/active', async function (req, res) {
   });
 });
 
+//Código para o base64
+
+app.post('/:session/download-media', async function (req, res) {
+  const sessionName = req.params.session;
+  const { messageId } = req.body || {};
+
+  console.log('[download-media] ▶️ entrou na rota', { sessionName, messageId });
+
+  if (!messageId) {
+    return res.status(400).send({
+      status: false,
+      reason: 'missing_message_id',
+      message: 'messageId é obrigatório',
+    });
+  }
+
+  try {
+    const client = await getOrCreateSession(sessionName);
+    const state = await client.getConnectionState();
+    console.log('[download-media] estado da sessão:', state);
+
+    if (state !== 'CONNECTED') {
+      return res.status(500).send({
+        status: false,
+        reason: 'not_connected',
+        message: 'Cliente não conectado',
+      });
+    }
+
+    const message = await client.getMessageById(messageId);
+    if (!message) {
+      console.log('[download-media] ❌ mensagem não encontrada pelo id');
+      return res.status(404).send({
+        status: false,
+        reason: 'message_not_found',
+        message: 'Mensagem não encontrada',
+      });
+    }
+
+    console.log('[download-media] mensagem localizada', {
+      type: message.type,
+      mimetype: message.mimetype,
+      hasDirectPath: !!message.directPath,
+    });
+
+    // Baixa a mídia (pode vir Buffer ou string base64/dataURL)
+    let mediaRaw;
+    try {
+      mediaRaw = await client.downloadMedia(message);
+    } catch (e) {
+      console.error('[download-media] erro no downloadMedia:', e?.message || e);
+      return res.status(500).send({
+        status: false,
+        reason: 'download_error',
+        message: 'Falha no download',
+        detail: String(e?.message || e),
+      });
+    }
+    if (!mediaRaw) {
+      return res.status(500).send({
+        status: false,
+        reason: 'empty_buffer',
+        message: 'Falha ao baixar mídia',
+      });
+    }
+
+    // Normaliza para base64 “puro” (sem prefixo data:)
+    let base64;
+    let mimetype = message.mimetype || 'application/octet-stream';
+
+    if (Buffer.isBuffer(mediaRaw)) {
+      base64 = mediaRaw.toString('base64');
+    } else if (typeof mediaRaw === 'string') {
+      // Pode vir como "data:image/jpeg;base64,AAAA..."
+      const m = /^data:([^;]+);base64,(.*)$/i.exec(mediaRaw);
+      if (m) {
+        mimetype = message.mimetype || m[1] || mimetype;
+        base64 = m[2];
+      } else {
+        // já é uma string base64
+        base64 = mediaRaw;
+      }
+    } else {
+      // fallback raro
+      try {
+        base64 = Buffer.from(mediaRaw).toString('base64');
+      } catch {
+        return res.status(500).send({
+          status: false,
+          reason: 'unknown_media_type',
+          message: 'Tipo de mídia inesperado',
+        });
+      }
+    }
+
+    // Checagem rápida de header (ajuda a detectar corrupção)
+    const probe = Buffer.from(base64, 'base64');
+    const headHex = probe.subarray(0, 8).toString('hex');
+    console.log('[download-media] headHex=', headHex, 'bytes=', probe.length);
+
+    // Se não veio mimetype, tenta “farejar” alguns casos comuns
+    if (!message.mimetype) {
+      if (probe[0] === 0xff && probe[1] === 0xd8 && probe[2] === 0xff) {
+        mimetype = 'image/jpeg';
+      } else if (
+        probe[0] === 0x89 &&
+        probe[1] === 0x50 &&
+        probe[2] === 0x4e &&
+        probe[3] === 0x47
+      ) {
+        mimetype = 'image/png';
+      } else if (probe.subarray(4, 8).toString('ascii') === 'ftyp') {
+        mimetype = 'video/mp4';
+      }
+    }
+
+    console.log('[download-media] ✅ sucesso, mime:', mimetype);
+
+    return res.send({
+      status: true,
+      data: base64, // base64 puro
+      mimetype, // ex: image/jpeg
+      size: probe.length, // bytes decodificados (útil p/ debug)
+    });
+  } catch (error) {
+    console.error('💥 [download-media] erro inesperado:', error);
+    return res.status(500).send({
+      status: false,
+      reason: 'unexpected',
+      message: 'Erro interno',
+      error: String(error?.message || error),
+    });
+  }
+});
+
+// Inicia o servidor
 const porta = '3003';
 var server = app
   .listen(porta, () => {
