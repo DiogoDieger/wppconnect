@@ -204,6 +204,7 @@ async function syncQrCodeState(sessionName, client) {
 
 // Função para criar sessão em background
 async function createSessionInBackground(sessionName) {
+  console.log('to entrando aqui');
   try {
     sessionStatus[sessionName] = {
       status: 'creating',
@@ -994,51 +995,85 @@ app.delete('/:session/cleansession', async function (req, res) {
 
 // Endpoint para enviar mensagem de texto
 app.post('/:session/sendmessage', async function (req, res) {
+  console.log('--- Nova requisição /sendmessage ---');
+
   const sessionName = req.params.session;
-  const client = await getOrCreateSession(sessionName);
   const telnumber = req.body.telnumber;
   const mensagemparaenvio = req.body.message;
 
+  console.log('Session recebida:', sessionName);
+  console.log('Número recebido:', telnumber);
+  console.log('Mensagem recebida:', mensagemparaenvio);
+
+  const client = await getOrCreateSession(sessionName);
+  console.log('Cliente retornado de getOrCreateSession:', typeof client);
+
   let mensagemretorno = '';
   let sucesso = false;
-  if (typeof client === 'object') {
-    const status = await client.getConnectionState();
-    if (status === 'CONNECTED') {
-      let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
-      if (numeroexiste.canReceiveMessage === true) {
-        await client
-          .sendText(numeroexiste.id._serialized, mensagemparaenvio)
-          .then((result) => {
-            console.log('Result: ', result);
-            sucesso = true;
 
-            mensagemretorno = result.id;
-            axios
-              .post(WEBHOOK_URL, {
-                event: 'sent',
-                session: sessionName,
-                telnumber,
-                message: mensagemparaenvio,
-                result,
-              })
-              .catch(console.error);
-          })
+  try {
+    if (typeof client === 'object') {
+      const status = await client.getConnectionState();
+      console.log(`Status da conexão da sessão [${sessionName}]:`, status);
 
-          .catch((erro) => {
-            console.error('Error when sending: ', erro);
-          });
+      if (status === 'CONNECTED') {
+        let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+        console.log('Resultado do checkNumberStatus:', numeroexiste);
+
+        if (numeroexiste && numeroexiste.canReceiveMessage === true) {
+          console.log('Número pode receber mensagem, enviando...');
+
+          await client
+            .sendText(numeroexiste.id._serialized, mensagemparaenvio)
+            .then((result) => {
+              console.log('✅ Mensagem enviada com sucesso:', result);
+              sucesso = true;
+              mensagemretorno = result.id;
+
+              axios
+                .post(WEBHOOK_URL, {
+                  event: 'sent',
+                  session: sessionName,
+                  telnumber,
+                  message: mensagemparaenvio,
+                  result,
+                })
+                .then(() =>
+                  console.log('Webhook disparado com sucesso para', WEBHOOK_URL)
+                )
+                .catch((err) =>
+                  console.error('Erro ao disparar webhook:', err.message)
+                );
+            })
+            .catch((erro) => {
+              console.error('❌ Erro ao enviar mensagem:', erro);
+              mensagemretorno = 'Erro interno ao enviar mensagem';
+            });
+        } else {
+          console.warn(
+            '⚠️ O número não está disponível ou não pode receber mensagens'
+          );
+          mensagemretorno =
+            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
+        }
       } else {
+        console.warn('⚠️ Sessão não está conectada:', status);
         mensagemretorno =
-          'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
+          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
       }
     } else {
+      console.error('❌ Cliente inválido, não inicializado');
       mensagemretorno =
-        'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
+        'A instancia não foi inicializada - The instance was not initialized';
     }
-  } else {
-    mensagemretorno =
-      'A instancia não foi inicializada - The instance was not initialized';
+  } catch (error) {
+    console.error('❌ Erro inesperado no fluxo de envio:', error);
+    mensagemretorno = 'Erro inesperado ao processar envio';
   }
+
+  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
+  console.log('--- Fim da requisição /sendmessage ---');
+
   res.send({ status: sucesso, message: mensagemretorno });
 });
 
