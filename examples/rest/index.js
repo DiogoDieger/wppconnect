@@ -7,6 +7,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
+const puppeteer = require('puppeteer');
 
 const qrcodesTemp = {};
 const instancias = {};
@@ -236,6 +237,8 @@ async function createSessionInBackground(sessionName) {
       console.log('QR Code capturado e armazenado');
     };
 
+    const executablePath = await puppeteer.executablePath();
+
     const client = await wppconnect.create({
       session: sessionName,
       catchQR,
@@ -247,7 +250,8 @@ async function createSessionInBackground(sessionName) {
       },
       headless: true,
       devtools: false,
-      useChrome: true,
+      // 🚫 NÃO use o Chrome do sistema
+      useChrome: false,
       debug: false,
       logQR: true,
       browserWS: '',
@@ -267,6 +271,7 @@ async function createSessionInBackground(sessionName) {
         '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
       ],
       puppeteerOptions: {
+        executablePath, // 👈 caminho do Chromium do Puppeteer
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -421,13 +426,15 @@ async function getOrCreateSession(sessionName) {
     console.log('QR Code capturado e armazenado');
   };
 
+  const executablePath = await puppeteer.executablePath();
+
   const client = await wppconnect.create({
     session: sessionName,
     catchQR,
     statusFind: (statusSession, session) => {},
     headless: true,
     devtools: false,
-    useChrome: true,
+    useChrome: false, // 👈 evita Chrome do sistema
     debug: false,
     logQR: true,
     browserWS: '',
@@ -447,6 +454,7 @@ async function getOrCreateSession(sessionName) {
       '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
     ],
     puppeteerOptions: {
+      executablePath, // 👈 usa Chromium do Puppeteer
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
