@@ -11,21 +11,6 @@ const { randomUUID } = require('crypto');
 const qrcodesTemp = {};
 const instancias = {};
 const sessionStatus = {}; // Para acompanhar o status de criação das sessões
-async function waitForQrCode(client, timeout = 15000, interval = 500) {
-  const started = Date.now();
-  return new Promise((resolve, reject) => {
-    const check = () => {
-      if (client.qrCodeData && client.qrCodeData.base64Image) {
-        return resolve(client.qrCodeData);
-      }
-      if (Date.now() - started > timeout) {
-        return resolve(null); // não rejeita para lógica padrão
-      }
-      setTimeout(check, interval);
-    };
-    check();
-  });
-}
 
 // ---- avatar cache (evita bater no WA toda hora)
 const avatarCache = new Map(); // key: jid, value: { url, ts }
