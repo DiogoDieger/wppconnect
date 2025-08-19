@@ -146,7 +146,7 @@ Dispara uma campanha em background para uma lista de contatos.
 
 ```bash
 # Disparar campanha
-curl -X POST http://localhost:3003/session1/dispatch-campaign \
+curl -X POST https://wppconnect-production-c06e.up.railway.app/session1/dispatch-campaign \
   -H "Content-Type: application/json" \
   -d '{
     "campaign": {
@@ -169,8 +169,8 @@ curl -X POST http://localhost:3003/session1/dispatch-campaign \
   }'
 
 # Verificar status
-curl http://localhost:3003/campaign/campaign_1703123456789_abc123def/status
+curl https://wppconnect-production-c06e.up.railway.app/campaign/campaign_1703123456789_abc123def/status
 
 # Cancelar campanha
-curl -X DELETE http://localhost:3003/campaign/campaign_1703123456789_abc123def/cancel
+curl -X DELETE https://wppconnect-production-c06e.up.railway.app/campaign/campaign_1703123456789_abc123def/cancel
 ```

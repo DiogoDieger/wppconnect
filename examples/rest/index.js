@@ -298,7 +298,7 @@ async function createSessionInBackground(sessionName) {
 
       if (message.type === 'document') {
         processedMessage = processDocumentMessage(message);
-        processedMessage.document.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        processedMessage.document.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
         console.log(`📄 Documento recebido na sessão ${sessionName}:`, {
           arquivo: processedMessage.document.filename,
           tamanho: processedMessage.document.size,
@@ -306,19 +306,19 @@ async function createSessionInBackground(sessionName) {
         });
       } else if (message.type === 'image') {
         processedMessage = processImageMessage(message);
-        processedMessage.image.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        processedMessage.image.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
         console.log(`🖼️ Imagem recebida na sessão ${sessionName}:`, {
           remetente: processedMessage.sender.name,
         });
       } else if (message.type === 'audio') {
         processedMessage = processAudioMessage(message);
-        processedMessage.audio.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        processedMessage.audio.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
         console.log(`🔊 Áudio recebido na sessão ${sessionName}:`, {
           remetente: processedMessage.sender.name,
         });
       } else if (message.type === 'video') {
         processedMessage = processVideoMessage(message);
-        processedMessage.video.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+        processedMessage.video.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
         console.log(`🎥 Vídeo recebido na sessão ${sessionName}:`, {
           remetente: processedMessage.sender.name,
         });
@@ -482,7 +482,7 @@ async function getOrCreateSession(sessionName) {
     if (message.type === 'document') {
       processedMessage = processDocumentMessage(message);
       // Adiciona URL de download local
-      processedMessage.document.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+      processedMessage.document.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
       console.log(`📄 Documento recebido na sessão ${sessionName}:`, {
         arquivo: processedMessage.document.filename,
         tamanho: processedMessage.document.size,
@@ -491,21 +491,21 @@ async function getOrCreateSession(sessionName) {
     } else if (message.type === 'image') {
       processedMessage = processImageMessage(message);
       // Adiciona URL de download local
-      processedMessage.image.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+      processedMessage.image.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
       console.log(`🖼️ Imagem recebida na sessão ${sessionName}:`, {
         remetente: processedMessage.sender.name,
       });
     } else if (message.type === 'audio') {
       processedMessage = processAudioMessage(message);
       // Adiciona URL de download local
-      processedMessage.audio.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+      processedMessage.audio.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
       console.log(`🔊 Áudio recebido na sessão ${sessionName}:`, {
         remetente: processedMessage.sender.name,
       });
     } else if (message.type === 'video') {
       processedMessage = processVideoMessage(message);
       // Adiciona URL de download local
-      processedMessage.video.localDownloadUrl = `http://localhost:3003/${sessionName}/downloadmedia/${message.id}`;
+      processedMessage.video.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
       console.log(`🎥 Vídeo recebido na sessão ${sessionName}:`, {
         remetente: processedMessage.sender.name,
       });
