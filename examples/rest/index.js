@@ -1194,38 +1194,148 @@ app.post('/:session/sendptt', async function (req, res) {
 
 // Envia imagem Eduardo
 app.post('/:session/sendimage', async function (req, res) {
+  console.log('--- Nova requisição /sendimage ---');
+
   const sessionName = req.params.session;
-  const client = await getOrCreateSession(sessionName);
   const telnumber = req.body.telnumber;
-  const imagePath = req.body.imagePath;
+  const imagePath = req.body.imagePath; // Caminho local ou URL
   const filename = req.body.filename || 'imagem.jpg';
   const caption = req.body.caption || '';
 
+  console.log('Session recebida:', sessionName);
+  console.log('Número recebido:', telnumber);
+  console.log('Arquivo recebido:', imagePath);
+
+  const client = await getOrCreateSession(sessionName);
+  console.log('Cliente retornado de getOrCreateSession:', typeof client);
+
   let mensagemretorno = '';
   let sucesso = false;
-  if (typeof client === 'object') {
-    const status = await client.getConnectionState();
-    if (status === 'CONNECTED') {
-      let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
-      if (numeroexiste.canReceiveMessage === true) {
-        await client
-          .sendImage(numeroexiste.id._serialized, imagePath, filename, caption)
-          .then((result) => {
-            sucesso = true;
-            mensagemretorno = result.id;
-          })
-          .catch((erro) => {
-            mensagemretorno = erro;
-          });
+
+  try {
+    if (typeof client === 'object') {
+      const status = await client.getConnectionState();
+      console.log(`Status da conexão da sessão [${sessionName}]:`, status);
+
+      if (status === 'CONNECTED') {
+        let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+        console.log('Resultado do checkNumberStatus:', numeroexiste);
+
+        if (numeroexiste && numeroexiste.canReceiveMessage === true) {
+          console.log('Número pode receber imagem, enviando...');
+
+          await client
+            .sendImage(
+              numeroexiste.id._serialized,
+              imagePath,
+              filename,
+              caption
+            )
+            .then((result) => {
+              console.log('✅ Imagem enviada com sucesso:', result);
+              sucesso = true;
+              mensagemretorno = result.id;
+            })
+            .catch((erro) => {
+              console.error('❌ Erro ao enviar imagem:', erro);
+              mensagemretorno = 'Erro interno ao enviar imagem';
+            });
+        } else {
+          console.warn('⚠️ O número não está disponível ou bloqueado');
+          mensagemretorno =
+            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
+        }
       } else {
-        mensagemretorno = 'O número não está disponível ou está bloqueado.';
+        console.warn('⚠️ Sessão não conectada:', status);
+        mensagemretorno =
+          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
       }
     } else {
-      mensagemretorno = 'Valide sua conexão com a internet ou QRCODE.';
+      console.error('❌ Cliente inválido, não inicializado');
+      mensagemretorno =
+        'A instancia não foi inicializada - The instance was not initialized';
     }
-  } else {
-    mensagemretorno = 'A instância não foi inicializada.';
+  } catch (error) {
+    console.error('❌ Erro inesperado no fluxo de envio de imagem:', error);
+    mensagemretorno = 'Erro inesperado ao processar envio de imagem';
   }
+
+  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
+  console.log('--- Fim da requisição /sendimage ---');
+
+  res.send({ status: sucesso, message: mensagemretorno });
+});
+// Endpoint para enviar PDF/documento
+app.post('/:session/senddocument', async function (req, res) {
+  console.log('--- Nova requisição /senddocument ---');
+
+  const sessionName = req.params.session;
+  const telnumber = req.body.telnumber;
+  const filePath = req.body.filePath; // Caminho local ou URL
+  const filename = req.body.filename || 'documento.pdf';
+  const caption = req.body.caption || '';
+
+  console.log('Session recebida:', sessionName);
+  console.log('Número recebido:', telnumber);
+  console.log('Arquivo recebido:', filePath);
+
+  const client = await getOrCreateSession(sessionName);
+  console.log('Cliente retornado de getOrCreateSession:', typeof client);
+
+  let mensagemretorno = '';
+  let sucesso = false;
+
+  try {
+    if (typeof client === 'object') {
+      const status = await client.getConnectionState();
+      console.log(`Status da conexão da sessão [${sessionName}]:`, status);
+
+      if (status === 'CONNECTED') {
+        let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+        console.log('Resultado do checkNumberStatus:', numeroexiste);
+
+        if (numeroexiste && numeroexiste.canReceiveMessage === true) {
+          console.log('Número pode receber documento, enviando...');
+
+          await client
+            .sendFile(
+              numeroexiste.id._serialized,
+              filePath, // caminho ou URL
+              filename, // nome exibido no WhatsApp
+              caption // legenda opcional
+            )
+            .then((result) => {
+              console.log('✅ Documento enviado com sucesso:', result);
+              sucesso = true;
+              mensagemretorno = result.id;
+            })
+            .catch((erro) => {
+              console.error('❌ Erro ao enviar documento:', erro);
+              mensagemretorno = 'Erro interno ao enviar documento';
+            });
+        } else {
+          console.warn('⚠️ O número não está disponível ou bloqueado');
+          mensagemretorno =
+            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
+        }
+      } else {
+        console.warn('⚠️ Sessão não conectada:', status);
+        mensagemretorno =
+          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
+      }
+    } else {
+      console.error('❌ Cliente inválido, não inicializado');
+      mensagemretorno =
+        'A instancia não foi inicializada - The instance was not initialized';
+    }
+  } catch (error) {
+    console.error('❌ Erro inesperado no fluxo de envio de documento:', error);
+    mensagemretorno = 'Erro inesperado ao processar envio de documento';
+  }
+
+  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
+  console.log('--- Fim da requisição /senddocument ---');
+
   res.send({ status: sucesso, message: mensagemretorno });
 });
 
@@ -1262,6 +1372,79 @@ app.get('/:session/history', async function (req, res) {
     }
   }
   res.send({ status: sucesso, messages });
+});
+// Endpoint para enviar vídeo
+app.post('/:session/sendvideo', async function (req, res) {
+  console.log('--- Nova requisição /sendvideo ---');
+
+  const sessionName = req.params.session;
+  const telnumber = req.body.telnumber;
+  const videoPath = req.body.videoPath; // Caminho local ou URL
+  const filename = req.body.filename || 'video.mp4';
+  const caption = req.body.caption || '';
+
+  console.log('Session recebida:', sessionName);
+  console.log('Número recebido:', telnumber);
+  console.log('Arquivo recebido:', videoPath);
+
+  const client = await getOrCreateSession(sessionName);
+  console.log('Cliente retornado de getOrCreateSession:', typeof client);
+
+  let mensagemretorno = '';
+  let sucesso = false;
+
+  try {
+    if (typeof client === 'object') {
+      const status = await client.getConnectionState();
+      console.log(`Status da conexão da sessão [${sessionName}]:`, status);
+
+      if (status === 'CONNECTED') {
+        let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+        console.log('Resultado do checkNumberStatus:', numeroexiste);
+
+        if (numeroexiste && numeroexiste.canReceiveMessage === true) {
+          console.log('Número pode receber vídeo, enviando...');
+
+          await client
+            .sendFile(
+              numeroexiste.id._serialized,
+              videoPath, // pode ser caminho local ou URL pública
+              filename, // nome exibido no WhatsApp
+              caption // legenda opcional
+            )
+            .then((result) => {
+              console.log('✅ Vídeo enviado com sucesso:', result);
+              sucesso = true;
+              mensagemretorno = result.id;
+            })
+            .catch((erro) => {
+              console.error('❌ Erro ao enviar vídeo:', erro);
+              mensagemretorno = 'Erro interno ao enviar vídeo';
+            });
+        } else {
+          console.warn('⚠️ O número não está disponível ou bloqueado');
+          mensagemretorno =
+            'O número não está disponível ou está bloqueado - The number is not available or is blocked.';
+        }
+      } else {
+        console.warn('⚠️ Sessão não conectada:', status);
+        mensagemretorno =
+          'Valide sua conexão com a internet ou QRCODE - Validate your internet connection or QRCODE';
+      }
+    } else {
+      console.error('❌ Cliente inválido, não inicializado');
+      mensagemretorno =
+        'A instância não foi inicializada - The instance was not initialized';
+    }
+  } catch (error) {
+    console.error('❌ Erro inesperado no fluxo de envio de vídeo:', error);
+    mensagemretorno = 'Erro inesperado ao processar envio de vídeo';
+  }
+
+  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
+  console.log('--- Fim da requisição /sendvideo ---');
+
+  res.send({ status: sucesso, message: mensagemretorno });
 });
 
 app.get('/:session/loadearlier', async function (req, res) {
