@@ -1,7 +1,7 @@
 const express = require('express');
 const app = express();
 const wppconnect = require('@wppconnect-team/wppconnect');
-const WEBHOOK_URL = 'https://crm.drzeuscapital.com.br/api/whatsappwebhook'; // substitua pela sua!
+const WEBHOOK_URL = 'http://localhost:3000/api/whatsappwebhook'; // substitua pela sua!
 const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
@@ -374,7 +374,9 @@ async function createSessionInBackground(sessionName) {
           };
         }
       }
-
+      const chatId =
+        message.chatId || (message.fromMe ? message.to : message.from);
+      processedMessage.chatId = chatId;
       axios
         .post(WEBHOOK_URL, {
           event: 'received',
