@@ -1,9 +1,11 @@
 const express = require('express');
 const app = express();
 const wppconnect = require('@wppconnect-team/wppconnect');
-const WEBHOOK_URL = 'http://localhost:3000/api/whatsappwebhook'; // substitua pela sua!
+const WEBHOOK_URL = 'https://crm.drzeuscapital.com.br/api/whatsappwebhook'; // substitua pela sua!
 const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+ffmpeg.setFfmpegPath(ffmpegPath);
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
@@ -16,7 +18,18 @@ const sessionStatus = {}; // Para acompanhar o status de criação das sessões
 // ---- avatar cache (evita bater no WA toda hora)
 const avatarCache = new Map(); // key: jid, value: { url, ts }
 const AVATAR_TTL_MS = 10 * 60 * 1000; // 10 min
-
+function isHttpUrl(s) {
+  return typeof s === 'string' && /^https?:\/\//i.test(s);
+}
+function filenameFromUrl(u, fallback = 'imagem.jpg') {
+  try {
+    const p = new URL(u).pathname;
+    const name = p.split('/').pop();
+    return name && name.includes('.') ? decodeURIComponent(name) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 async function safeGetAvatar(client, jid) {
   if (!jid) return null;
 
@@ -218,7 +231,7 @@ async function createSessionInBackground(sessionName) {
     let clientInstance = null;
     let qrCodeDataTemp = null;
     const QRCODE_LIFETIME = 40 * 1000;
-
+    let client;
     const catchQR = (base64Qr, asciiQR, attempts, urlCode) => {
       const expiresAt = Date.now() + QRCODE_LIFETIME;
       const qr = {
@@ -239,7 +252,7 @@ async function createSessionInBackground(sessionName) {
 
     const executablePath = await puppeteer.executablePath();
 
-    const client = await wppconnect.create({
+    client = await wppconnect.create({
       session: sessionName,
       catchQR,
       statusFind: (statusSession, session) => {
@@ -397,6 +410,7 @@ async function createSessionInBackground(sessionName) {
   } catch (error) {
     sessionStatus[sessionName] = { status: 'error', message: error.message };
     console.error(`Erro ao criar sessão ${sessionName}:`, error);
+    delete instancias[sessionName];
     throw error;
   }
 }
@@ -409,55 +423,39 @@ async function getOrCreateSession(sessionName) {
   }
 
   cleanupSession(sessionName);
-
-  let qrCodeData = null;
-  let clientInstance = null;
-  let qrCodeDataTemp = null;
-  const QRCODE_LIFETIME = 40 * 1000;
-  const catchQR = (base64Qr, asciiQR, attempts, urlCode) => {
-    const expiresAt = Date.now() + QRCODE_LIFETIME;
-    const qr = {
-      base64Image: base64Qr,
-      urlCode: urlCode,
-      asciiQR: asciiQR,
-      attempts: attempts,
-      expiresAt,
+  try {
+    let qrCodeData = null;
+    let clientInstance = null;
+    let qrCodeDataTemp = null;
+    const QRCODE_LIFETIME = 40 * 1000;
+    let client;
+    const catchQR = (base64Qr, asciiQR, attempts, urlCode) => {
+      const expiresAt = Date.now() + QRCODE_LIFETIME;
+      const qr = {
+        base64Image: base64Qr,
+        urlCode: urlCode,
+        asciiQR: asciiQR,
+        attempts: attempts,
+        expiresAt,
+      };
+      qrcodesTemp[sessionName] = qr; // <--- Salva no cache global
+      if (client) client.qrCodeData = qr;
+      console.log('QR Code capturado e armazenado');
     };
-    qrcodesTemp[sessionName] = qr; // <--- Salva no cache global
-    if (client) client.qrCodeData = qr;
-    console.log('QR Code capturado e armazenado');
-  };
 
-  const executablePath = await puppeteer.executablePath();
+    const executablePath = await puppeteer.executablePath();
 
-  const client = await wppconnect.create({
-    session: sessionName,
-    catchQR,
-    statusFind: (statusSession, session) => {},
-    headless: true,
-    devtools: false,
-    useChrome: false, // 👈 evita Chrome do sistema
-    debug: false,
-    logQR: true,
-    browserWS: '',
-    browserArgs: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--disable-gpu',
-      '--disable-background-timer-throttling',
-      '--disable-backgrounding-occluded-windows',
-      '--disable-renderer-backgrounding',
-      '--disable-features=TranslateUI',
-      '--disable-ipc-flooding-protection',
-      '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
-    ],
-    puppeteerOptions: {
-      executablePath, // 👈 usa Chromium do Puppeteer
-      args: [
+    client = await wppconnect.create({
+      session: sessionName,
+      catchQR,
+      statusFind: (statusSession, session) => {},
+      headless: true,
+      devtools: false,
+      useChrome: false, // 👈 evita Chrome do sistema
+      debug: false,
+      logQR: true,
+      browserWS: '',
+      browserArgs: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
@@ -470,116 +468,137 @@ async function getOrCreateSession(sessionName) {
         '--disable-renderer-backgrounding',
         '--disable-features=TranslateUI',
         '--disable-ipc-flooding-protection',
+        '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
       ],
-    },
-    disableWelcome: false,
-    updatesLog: true,
-    autoClose: 240000,
-    tokenStore: 'file',
-    folderNameToken: './tokens',
-  });
+      puppeteerOptions: {
+        executablePath, // 👈 usa Chromium do Puppeteer
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-features=TranslateUI',
+          '--disable-ipc-flooding-protection',
+        ],
+      },
+      disableWelcome: false,
+      updatesLog: true,
+      autoClose: 0,
+      tokenStore: 'file',
+      folderNameToken: './tokens',
+    });
 
-  // Atualiza a referência do cliente e adiciona o QR code
-  clientInstance = client;
-  client.qrCodeData = qrCodeData;
+    // Atualiza a referência do cliente e adiciona o QR code
+    clientInstance = client;
+    client.qrCodeData = qrCodeData;
 
-  // Se o QR code foi capturado durante a criação, atribui ao cliente
-  if (qrCodeDataTemp) client.qrCodeData = qrCodeDataTemp;
+    // Se o QR code foi capturado durante a criação, atribui ao cliente
+    if (qrCodeDataTemp) client.qrCodeData = qrCodeDataTemp;
 
-  client.onMessage(async (message) => {
-    let processedMessage;
+    client.onMessage(async (message) => {
+      let processedMessage;
 
-    // Processa diferentes tipos de mensagem
-    if (message.type === 'document') {
-      processedMessage = processDocumentMessage(message);
-      // Adiciona URL de download local
-      processedMessage.document.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
-      console.log(`📄 Documento recebido na sessão ${sessionName}:`, {
-        arquivo: processedMessage.document.filename,
-        tamanho: processedMessage.document.size,
-        remetente: processedMessage.sender.name,
-      });
-    } else if (message.type === 'image') {
-      processedMessage = processImageMessage(message);
-      // Adiciona URL de download local
-      processedMessage.image.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
-      console.log(`🖼️ Imagem recebida na sessão ${sessionName}:`, {
-        remetente: processedMessage.sender.name,
-      });
-    } else if (message.type === 'audio') {
-      processedMessage = processAudioMessage(message);
-      // Adiciona URL de download local
-      processedMessage.audio.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
-      console.log(`🔊 Áudio recebido na sessão ${sessionName}:`, {
-        remetente: processedMessage.sender.name,
-      });
-    } else if (message.type === 'video') {
-      processedMessage = processVideoMessage(message);
-      // Adiciona URL de download local
-      processedMessage.video.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
-      console.log(`🎥 Vídeo recebido na sessão ${sessionName}:`, {
-        remetente: processedMessage.sender.name,
-      });
-    } else {
-      processedMessage = processRegularMessage(message);
-      console.log(`💬 Mensagem recebida na sessão ${sessionName}:`, {
-        tipo: processedMessage.type,
-        corpo: processedMessage.body,
-        remetente: processedMessage.sender.name,
-      });
-    }
-
-    const jidForAvatar =
-      (message.sender && message.sender.id) || message.author || message.from;
-
-    // thumb que às vezes já vem no payload:
-    const thumb =
-      message.sender?.profilePicThumbObj?.eurl ||
-      message.sender?.profilePicUrl ||
-      null;
-
-    let avatarUrl = thumb;
-    if (!avatarUrl && jidForAvatar) {
-      avatarUrl = await safeGetAvatar(client, jidForAvatar);
-    }
-
-    // garante que processedMessage.sender existe
-    processedMessage.sender = processedMessage.sender || {
-      id: message.sender?.id,
-      name: message.sender?.name,
-      pushname: message.sender?.pushname,
-    };
-
-    if (avatarUrl) {
-      processedMessage.sender.profilePicUrl = avatarUrl;
-      console.log('[avatar] remetente', jidForAvatar, '→', avatarUrl);
-    } else {
-      console.log('[avatar] remetente', jidForAvatar, '→ (sem foto)');
-    }
-
-    // (opcional) se for grupo, pega a foto do grupo também
-    if (String(message.from || '').endsWith('@g.us')) {
-      const groupPic = await safeGetAvatar(client, message.from);
-      if (groupPic) {
-        processedMessage.chat = {
-          ...(processedMessage.chat || {}),
-          profilePicUrl: groupPic,
-        };
-        console.log('[avatar] grupo', message.from, '→', groupPic);
+      // Processa diferentes tipos de mensagem
+      if (message.type === 'document') {
+        processedMessage = processDocumentMessage(message);
+        // Adiciona URL de download local
+        processedMessage.document.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`📄 Documento recebido na sessão ${sessionName}:`, {
+          arquivo: processedMessage.document.filename,
+          tamanho: processedMessage.document.size,
+          remetente: processedMessage.sender.name,
+        });
+      } else if (message.type === 'image') {
+        processedMessage = processImageMessage(message);
+        // Adiciona URL de download local
+        processedMessage.image.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`🖼️ Imagem recebida na sessão ${sessionName}:`, {
+          remetente: processedMessage.sender.name,
+        });
+      } else if (message.type === 'audio') {
+        processedMessage = processAudioMessage(message);
+        // Adiciona URL de download local
+        processedMessage.audio.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`🔊 Áudio recebido na sessão ${sessionName}:`, {
+          remetente: processedMessage.sender.name,
+        });
+      } else if (message.type === 'video') {
+        processedMessage = processVideoMessage(message);
+        // Adiciona URL de download local
+        processedMessage.video.localDownloadUrl = `https://wppconnect-production-c06e.up.railway.app/${sessionName}/downloadmedia/${message.id}`;
+        console.log(`🎥 Vídeo recebido na sessão ${sessionName}:`, {
+          remetente: processedMessage.sender.name,
+        });
+      } else {
+        processedMessage = processRegularMessage(message);
+        console.log(`💬 Mensagem recebida na sessão ${sessionName}:`, {
+          tipo: processedMessage.type,
+          corpo: processedMessage.body,
+          remetente: processedMessage.sender.name,
+        });
       }
-    }
 
-    // Envia para o webhook
-    axios
-      .post(WEBHOOK_URL, {
-        event: 'received',
-        session: sessionName,
-        message: processedMessage,
-      })
-      .catch(console.error);
-  });
-  instancias[sessionName] = client;
-  return client;
+      const jidForAvatar =
+        (message.sender && message.sender.id) || message.author || message.from;
+
+      // thumb que às vezes já vem no payload:
+      const thumb =
+        message.sender?.profilePicThumbObj?.eurl ||
+        message.sender?.profilePicUrl ||
+        null;
+
+      let avatarUrl = thumb;
+      if (!avatarUrl && jidForAvatar) {
+        avatarUrl = await safeGetAvatar(client, jidForAvatar);
+      }
+
+      // garante que processedMessage.sender existe
+      processedMessage.sender = processedMessage.sender || {
+        id: message.sender?.id,
+        name: message.sender?.name,
+        pushname: message.sender?.pushname,
+      };
+
+      if (avatarUrl) {
+        processedMessage.sender.profilePicUrl = avatarUrl;
+        console.log('[avatar] remetente', jidForAvatar, '→', avatarUrl);
+      } else {
+        console.log('[avatar] remetente', jidForAvatar, '→ (sem foto)');
+      }
+
+      // (opcional) se for grupo, pega a foto do grupo também
+      if (String(message.from || '').endsWith('@g.us')) {
+        const groupPic = await safeGetAvatar(client, message.from);
+        if (groupPic) {
+          processedMessage.chat = {
+            ...(processedMessage.chat || {}),
+            profilePicUrl: groupPic,
+          };
+          console.log('[avatar] grupo', message.from, '→', groupPic);
+        }
+      }
+
+      // Envia para o webhook
+      axios
+        .post(WEBHOOK_URL, {
+          event: 'received',
+          session: sessionName,
+          message: processedMessage,
+        })
+        .catch(console.error);
+    });
+    instancias[sessionName] = client;
+    return client;
+  } catch (err) {
+    delete instancias[sessionName];
+    return;
+  }
 }
 
 // Endpoint para download de mídia (documentos, imagens, áudios, vídeos)
@@ -770,11 +789,20 @@ app.post('/:session/createsession', async function (req, res) {
 
   try {
     if (instancias[sessionName]) {
+      let meInfo;
+      const wid = await instancias[sessionName].getWid();
+      const profile = await instancias[sessionName].getNumberProfile(wid);
+
+      meInfo = {
+        wid: wid, // ex: 5511999999999@c.us
+        id: wid.replace('@c.us', ''), // ex: 5511999999999
+      };
       return res.send({
         status: true,
         message: 'Sessão já existe',
         session: sessionName,
         connectionState: 'CONNECTED',
+        numberInfo: meInfo,
       });
     }
 
@@ -847,8 +875,25 @@ app.get('/:session/status', async function (req, res) {
     // Sessão já existe
     if (hasInstance) {
       let connectionState = 'UNKNOWN';
+      let meInfo = null;
       try {
         connectionState = await instancias[sessionName].getConnectionState();
+        if (connectionState === 'CONNECTED') {
+          try {
+            const wid = await instancias[sessionName].getWid();
+            const profile = await instancias[sessionName].getNumberProfile(wid);
+
+            meInfo = {
+              wid: wid, // ex: 5511999999999@c.us
+              id: wid.replace('@c.us', ''), // ex: 5511999999999
+            };
+          } catch (e) {
+            console.warn(
+              `[STATUS:${reqId}] erro ao obter número logado:`,
+              e.message
+            );
+          }
+        }
       } catch (e) {
         console.error(
           `⚠️ [STATUS:${reqId}] getConnectionState falhou: ${e?.message || e}`
@@ -868,6 +913,7 @@ app.get('/:session/status', async function (req, res) {
         session: sessionName,
         connectionState,
         sessionStatus: 'ready',
+        numberInfo: meInfo,
       });
     }
 
@@ -1011,80 +1057,67 @@ app.post('/:session/sendmessage', async function (req, res) {
   const telnumber = req.body.telnumber;
   const mensagemparaenvio = req.body.message;
 
-  console.log('Session recebida:', sessionName);
-  console.log('Número recebido:', telnumber);
-  console.log('Mensagem recebida:', mensagemparaenvio);
-
   const client = await getOrCreateSession(sessionName);
-  console.log('Cliente retornado de getOrCreateSession:', typeof client);
 
-  let mensagemretorno = '';
-  let sucesso = false;
-
-  try {
-    if (typeof client === 'object') {
-      const status = await client.getConnectionState();
-      console.log(`Status da conexão da sessão [${sessionName}]:`, status);
-
-      if (status === 'CONNECTED') {
-        let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
-        console.log('Resultado do checkNumberStatus:', numeroexiste);
-
-        if (numeroexiste && numeroexiste.canReceiveMessage === true) {
-          console.log('Número pode receber mensagem, enviando...');
-
-          await client
-            .sendText(numeroexiste.id._serialized, mensagemparaenvio)
-            .then((result) => {
-              console.log('✅ Mensagem enviada com sucesso:', result);
-              sucesso = true;
-              mensagemretorno = result.id;
-
-              axios
-                .post(WEBHOOK_URL, {
-                  event: 'sent',
-                  session: sessionName,
-                  telnumber,
-                  message: mensagemparaenvio,
-                  result,
-                })
-                .then(() =>
-                  console.log('Webhook disparado com sucesso para', WEBHOOK_URL)
-                )
-                .catch((err) =>
-                  console.error('Erro ao disparar webhook:', err.message)
-                );
-            })
-            .catch((erro) => {
-              console.error('❌ Erro ao enviar mensagem:', erro);
-              mensagemretorno = 'Erro interno ao enviar mensagem';
-            });
-        } else {
-          console.warn(
-            '⚠️ O número não está disponível ou não pode receber mensagens'
-          );
-          mensagemretorno =
-            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
-        }
-      } else {
-        console.warn('⚠️ Sessão não está conectada:', status);
-        mensagemretorno =
-          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
-      }
-    } else {
-      console.error('❌ Cliente inválido, não inicializado');
-      mensagemretorno =
-        'A instancia não foi inicializada - The instance was not initialized';
-    }
-  } catch (error) {
-    console.error('❌ Erro inesperado no fluxo de envio:', error);
-    mensagemretorno = 'Erro inesperado ao processar envio';
+  if (!client) {
+    return res.status(404).send({
+      status: false,
+      message: `Sessão [${sessionName}] não existe ou não foi inicializada`,
+    });
   }
 
-  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
-  console.log('--- Fim da requisição /sendmessage ---');
+  try {
+    const status = await client.getConnectionState();
+    if (status !== 'CONNECTED') {
+      return res.send({
+        status: false,
+        message: 'Sessão não está conectada. Reescaneie o QRCode.',
+      });
+    }
 
-  res.send({ status: sucesso, message: mensagemretorno });
+    // 🔹 Normaliza número
+    const numero = telnumber.replace(/\D/g, '');
+    const jid = numero + '@c.us';
+
+    // 🔹 Checa se existe e pode receber
+    const numeroexiste = await client.checkNumberStatus(jid);
+    console.log('Resultado do checkNumberStatus:', numeroexiste);
+
+    if (!numeroexiste || !numeroexiste.canReceiveMessage) {
+      return res.send({
+        status: false,
+        message: 'Número não existe ou não pode receber mensagens',
+      });
+    }
+
+    const to = numeroexiste.id._serialized;
+
+    // 🔹 Workaround → força criação do chat local
+    await client.sendSeen(to).catch(() => {});
+
+    // 🔹 Agora envia a mensagem
+    const result = await client.sendText(to, mensagemparaenvio);
+
+    console.log('✅ Mensagem enviada com sucesso:', result);
+
+    axios.post(WEBHOOK_URL, {
+      event: 'sent',
+      session: sessionName,
+      telnumber,
+      message: mensagemparaenvio,
+      result,
+    });
+    return res.send({
+      status: true,
+      message: result.id,
+    });
+  } catch (error) {
+    console.error('❌ Erro ao enviar mensagem:', error);
+    return res.send({
+      status: false,
+      message: error.message || 'Erro interno ao enviar mensagem',
+    });
+  }
 });
 
 // Endpoint para enviar mensagem PIX (mantido do original)
@@ -1096,6 +1129,7 @@ app.post('/:session/sendpixmessage', async function (req, res) {
   const options = req.body.options;
   let mensagemretorno = '';
   let sucesso = false;
+
   if (typeof client === 'object') {
     const status = await client.getConnectionState();
     if (status === 'CONNECTED') {
@@ -1126,73 +1160,113 @@ app.post('/:session/sendpixmessage', async function (req, res) {
 });
 app.post('/:session/sendptt', async function (req, res) {
   const sessionName = req.params.session;
-  const client = await getOrCreateSession(sessionName);
   const telnumber = req.body.telnumber;
-  const audioPath = req.body.audioPath; // Caminho do arquivo de áudio no servidor
-
-  // Caminho temporário para o arquivo convertido
-  const outputPath = path.join(
-    path.dirname(audioPath),
-    `converted_${Date.now()}.ogg`
-  );
-
-  // Função para converter o áudio para OGG/Opus
-  function convertToOpus(input, output) {
-    return new Promise((resolve, reject) => {
-      ffmpeg(input)
-        .audioCodec('libopus')
-        .audioBitrate('64k')
-        .audioChannels(1)
-        .audioFrequency(48000)
-        .format('ogg')
-        .on('end', () => resolve(output))
-        .on('error', reject)
-        .save(output);
-    });
-  }
+  const audioPath = req.body.audioPath; // URL pública ou path local
 
   let mensagemretorno = '';
   let sucesso = false;
+  let finalPath = audioPath;
 
-  if (typeof client === 'object') {
+  try {
+    const client = await getOrCreateSession(sessionName);
+    if (!client) throw new Error('Instância não inicializada');
+
     const status = await client.getConnectionState();
-    if (status === 'CONNECTED') {
-      let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
-      if (numeroexiste.canReceiveMessage === true) {
-        try {
-          // Converte o áudio antes de enviar
-          await convertToOpus(audioPath, outputPath);
+    if (status !== 'CONNECTED') throw new Error('Sessão não conectada');
 
-          await client
-            .sendPtt(numeroexiste.id._serialized, outputPath)
-            .then((result) => {
-              sucesso = true;
-              mensagemretorno = result.id;
-              // Remove o arquivo convertido após o envio
-              fs.unlinkSync(outputPath);
-            })
-            .catch((erro) => {
-              mensagemretorno = erro;
-              fs.unlinkSync(outputPath);
-            });
-        } catch (err) {
-          mensagemretorno = 'Erro ao converter o áudio: ' + err;
-        }
-      } else {
-        mensagemretorno = 'O número não está disponível ou está bloqueado.';
-      }
-    } else {
-      mensagemretorno = 'Valide sua conexão com a internet ou QRCODE.';
+    const numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+    if (!numeroexiste || !numeroexiste.canReceiveMessage)
+      throw new Error('Número não disponível ou bloqueado');
+
+    // 🔹 Se for URL, baixa e converte
+    if (/^https?:\/\//i.test(audioPath)) {
+      console.log('🎤 Baixando áudio da URL:', audioPath);
+      const resp = await axios.get(audioPath, { responseType: 'arraybuffer' });
+
+      // sempre salva como .webm
+      const tempInput = path.join(__dirname, `temp_${Date.now()}.webm`);
+      const tempOutput = path.join(__dirname, `ptt_${Date.now()}.ogg`);
+
+      fs.writeFileSync(tempInput, Buffer.from(resp.data));
+
+      await new Promise((resolve, reject) => {
+        ffmpeg(tempInput)
+          .inputFormat('webm') // 👈 força leitura como webm
+          .audioCodec('libopus')
+          .audioBitrate('64k')
+          .audioChannels(1)
+          .audioFrequency(48000)
+          .format('ogg')
+          .on('end', resolve)
+          .on('error', reject)
+          .save(tempOutput);
+      });
+
+      fs.unlinkSync(tempInput);
+      finalPath = tempOutput;
+      console.log('✅ Convertido para OGG Opus:', finalPath);
     }
-  } else {
-    mensagemretorno = 'A instância não foi inicializada.';
+
+    // ✅ Envia o PTT
+    const result = await client.sendPtt(numeroexiste.id._serialized, finalPath);
+    sucesso = true;
+    mensagemretorno = result.id;
+    console.log('✅ PTT enviado com sucesso:', result);
+
+    // 🔥 dispara webhook
+    await axios
+      .post(WEBHOOK_URL, {
+        event: 'sent',
+        session: sessionName,
+        telnumber,
+        message: {
+          type: 'ptt',
+          id: result?.id,
+          audioPath,
+        },
+        result: { id: result.id },
+      })
+      .catch((err) => {
+        console.error('⚠️ Falha ao notificar webhook:', err?.message || err);
+      });
+
+    res.send({ status: true, message: mensagemretorno });
+  } catch (err) {
+    console.error('❌ Erro ao enviar PTT:', err);
+    res.send({ status: false, message: err.message || 'Erro interno' });
+  } finally {
+    // 🔹 Apaga o arquivo convertido se existir
+    if (
+      finalPath &&
+      finalPath.startsWith(__dirname) &&
+      fs.existsSync(finalPath)
+    ) {
+      try {
+        fs.unlinkSync(finalPath);
+        console.log('🧹 Arquivo temporário removido:', finalPath);
+      } catch (e) {
+        console.error('⚠️ Falha ao remover arquivo temporário:', e.message);
+      }
+    }
   }
-  res.send({ status: sucesso, message: mensagemretorno });
 });
+
 // Não inicializa nenhuma sessão automaticamente
 // O servidor só inicia]
 
 // Envia imagem Eduardo
+// 🔹 Função para normalizar o número no formato internacional
+function normalizePhone(number) {
+  if (!number) return '';
+  const digits = String(number).replace(/\D/g, ''); // só números
+
+  // Se já começar com 55 (Brasil), mantém
+  if (digits.startsWith('55')) return digits;
+
+  // Se não começar com 55, adiciona (ajusta para seu país se necessário)
+  return '55' + digits;
+}
+
 app.post('/:session/sendimage', async function (req, res) {
   console.log('--- Nova requisição /sendimage ---');
 
@@ -1202,76 +1276,69 @@ app.post('/:session/sendimage', async function (req, res) {
   const filename = req.body.filename || 'imagem.jpg';
   const caption = req.body.caption || '';
 
-  console.log('Session recebida:', sessionName);
-  console.log('Número recebido:', telnumber);
-  console.log('Arquivo recebido:', imagePath);
-
-  const client = await getOrCreateSession(sessionName);
-  console.log('Cliente retornado de getOrCreateSession:', typeof client);
-
   let mensagemretorno = '';
   let sucesso = false;
+  let sendResult = null;
 
   try {
-    if (typeof client === 'object') {
-      const status = await client.getConnectionState();
-      console.log(`Status da conexão da sessão [${sessionName}]:`, status);
+    const client = await getOrCreateSession(sessionName);
+    if (typeof client !== 'object') throw new Error('Instância inválida');
 
-      if (status === 'CONNECTED') {
-        let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
-        console.log('Resultado do checkNumberStatus:', numeroexiste);
+    const status = await client.getConnectionState();
+    if (status !== 'CONNECTED') throw new Error('Sessão não conectada');
 
-        if (numeroexiste && numeroexiste.canReceiveMessage === true) {
-          console.log('Número pode receber imagem, enviando...');
+    const normalized = normalizePhone(telnumber);
+    const jid = normalized + '@c.us';
 
-          await client
-            .sendImage(
-              numeroexiste.id._serialized,
-              imagePath,
-              filename,
-              caption
-            )
-            .then((result) => {
-              console.log('✅ Imagem enviada com sucesso:', result);
-              sucesso = true;
-              mensagemretorno = result.id;
-            })
-            .catch((erro) => {
-              console.error('❌ Erro ao enviar imagem:', erro);
-              mensagemretorno = 'Erro interno ao enviar imagem';
-            });
-        } else {
-          console.warn('⚠️ O número não está disponível ou bloqueado');
-          mensagemretorno =
-            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
-        }
-      } else {
-        console.warn('⚠️ Sessão não conectada:', status);
-        mensagemretorno =
-          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
-      }
-    } else {
-      console.error('❌ Cliente inválido, não inicializado');
-      mensagemretorno =
-        'A instancia não foi inicializada - The instance was not initialized';
+    const numeroexiste = await client.checkNumberStatus(jid);
+    if (!numeroexiste || !numeroexiste.canReceiveMessage) {
+      throw new Error('Número não disponível ou bloqueado');
     }
-  } catch (error) {
-    console.error('❌ Erro inesperado no fluxo de envio de imagem:', error);
-    mensagemretorno = 'Erro inesperado ao processar envio de imagem';
-  }
 
-  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
-  console.log('--- Fim da requisição /sendimage ---');
+    sendResult = await client.sendImage(
+      numeroexiste.id._serialized,
+      imagePath,
+      filename,
+      caption
+    );
+
+    sucesso = true;
+    mensagemretorno = sendResult.id;
+    console.log('✅ Imagem enviada com sucesso:', sendResult);
+
+    // 🔹 dispara webhook
+    await axios
+      .post(WEBHOOK_URL, {
+        event: 'sent',
+        session: sessionName,
+        telnumber: normalized,
+        message: {
+          type: 'image',
+          id: sendResult?.id,
+          imagePath,
+          filename,
+          caption,
+        },
+        result: sendResult && { id: sendResult.id },
+      })
+      .catch((err) => {
+        console.error('⚠️ Falha ao notificar webhook:', err?.message || err);
+      });
+  } catch (error) {
+    console.error('❌ Erro no fluxo de envio de imagem:', error);
+    mensagemretorno = error.message || 'Erro inesperado ao enviar imagem';
+  }
 
   res.send({ status: sucesso, message: mensagemretorno });
 });
+
 // Endpoint para enviar PDF/documento
 app.post('/:session/senddocument', async function (req, res) {
   console.log('--- Nova requisição /senddocument ---');
 
   const sessionName = req.params.session;
   const telnumber = req.body.telnumber;
-  const filePath = req.body.filePath; // Caminho local ou URL
+  const filePath = req.body.filePath;
   const filename = req.body.filename || 'documento.pdf';
   const caption = req.body.caption || '';
 
@@ -1284,6 +1351,7 @@ app.post('/:session/senddocument', async function (req, res) {
 
   let mensagemretorno = '';
   let sucesso = false;
+  let resultObj = null;
 
   try {
     if (typeof client === 'object') {
@@ -1298,16 +1366,12 @@ app.post('/:session/senddocument', async function (req, res) {
           console.log('Número pode receber documento, enviando...');
 
           await client
-            .sendFile(
-              numeroexiste.id._serialized,
-              filePath, // caminho ou URL
-              filename, // nome exibido no WhatsApp
-              caption // legenda opcional
-            )
+            .sendFile(numeroexiste.id._serialized, filePath, filename, caption)
             .then((result) => {
               console.log('✅ Documento enviado com sucesso:', result);
               sucesso = true;
               mensagemretorno = result.id;
+              resultObj = result;
             })
             .catch((erro) => {
               console.error('❌ Erro ao enviar documento:', erro);
@@ -1315,28 +1379,48 @@ app.post('/:session/senddocument', async function (req, res) {
             });
         } else {
           console.warn('⚠️ O número não está disponível ou bloqueado');
-          mensagemretorno =
-            'O numero não está disponível ou está bloqueado - The number is not available or is blocked.';
+          mensagemretorno = 'Número indisponível ou bloqueado';
         }
       } else {
         console.warn('⚠️ Sessão não conectada:', status);
-        mensagemretorno =
-          'Valide sua conexao com a internet ou QRCODE - Validate your internet connection or QRCODE';
+        mensagemretorno = 'Sessão não conectada';
       }
     } else {
       console.error('❌ Cliente inválido, não inicializado');
-      mensagemretorno =
-        'A instancia não foi inicializada - The instance was not initialized';
+      mensagemretorno = 'Instância não inicializada';
     }
   } catch (error) {
-    console.error('❌ Erro inesperado no fluxo de envio de documento:', error);
+    console.error('❌ Erro inesperado:', error);
     mensagemretorno = 'Erro inesperado ao processar envio de documento';
   }
 
-  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
+  const responsePayload = { status: sucesso, message: mensagemretorno };
+  console.log('Retorno final:', responsePayload);
   console.log('--- Fim da requisição /senddocument ---');
 
-  res.send({ status: sucesso, message: mensagemretorno });
+  res.send(responsePayload);
+
+  // 🔔 Notificar webhook
+  try {
+    await axios.post(
+      WEBHOOK_URL || 'http://localhost:3000/api/whatsapp/webhook',
+      {
+        event: 'sent',
+        session: sessionName,
+        telnumber,
+        message: {
+          type: 'document',
+          body: caption,
+          filePath,
+          filename,
+        },
+        result: resultObj,
+      }
+    );
+    console.log('📢 Webhook notificado com sucesso');
+  } catch (err) {
+    console.error('⚠️ Falha ao notificar webhook:', err.message);
+  }
 });
 
 app.get('/:session/history', async function (req, res) {
@@ -1378,20 +1462,24 @@ app.post('/:session/sendvideo', async function (req, res) {
   console.log('--- Nova requisição /sendvideo ---');
 
   const sessionName = req.params.session;
-  const telnumber = req.body.telnumber;
-  const videoPath = req.body.videoPath; // Caminho local ou URL
+  const telnumberRaw = req.body.telnumber; // pode vir com símbolos
+  const videoPath = req.body.videoPath; // URL pública (Firebase)
   const filename = req.body.filename || 'video.mp4';
   const caption = req.body.caption || '';
 
   console.log('Session recebida:', sessionName);
-  console.log('Número recebido:', telnumber);
+  console.log('Número recebido:', telnumberRaw);
   console.log('Arquivo recebido:', videoPath);
+
+  // normaliza número: só dígitos
+  const telnumber = String(telnumberRaw || '').replace(/\D/g, '');
 
   const client = await getOrCreateSession(sessionName);
   console.log('Cliente retornado de getOrCreateSession:', typeof client);
 
   let mensagemretorno = '';
   let sucesso = false;
+  let resultSend = null;
 
   try {
     if (typeof client === 'object') {
@@ -1399,22 +1487,19 @@ app.post('/:session/sendvideo', async function (req, res) {
       console.log(`Status da conexão da sessão [${sessionName}]:`, status);
 
       if (status === 'CONNECTED') {
-        let numeroexiste = await client.checkNumberStatus(telnumber + '@c.us');
+        const wid = telnumber + '@c.us';
+        let numeroexiste = await client.checkNumberStatus(wid);
         console.log('Resultado do checkNumberStatus:', numeroexiste);
 
         if (numeroexiste && numeroexiste.canReceiveMessage === true) {
           console.log('Número pode receber vídeo, enviando...');
 
           await client
-            .sendFile(
-              numeroexiste.id._serialized,
-              videoPath, // pode ser caminho local ou URL pública
-              filename, // nome exibido no WhatsApp
-              caption // legenda opcional
-            )
+            .sendFile(numeroexiste.id._serialized, videoPath, filename, caption)
             .then((result) => {
               console.log('✅ Vídeo enviado com sucesso:', result);
               sucesso = true;
+              resultSend = result;
               mensagemretorno = result.id;
             })
             .catch((erro) => {
@@ -1443,6 +1528,30 @@ app.post('/:session/sendvideo', async function (req, res) {
 
   console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
   console.log('--- Fim da requisição /sendvideo ---');
+
+  // 🔔 Notifica o webhook (não bloqueia a resposta, erro aqui só loga)
+  (async () => {
+    try {
+      await axios.post(WEBHOOK_URL, {
+        event: 'sent',
+        session: sessionName,
+        telnumber: telnumber, // apenas dígitos
+        message: {
+          type: 'video',
+          filename,
+          filePath: videoPath,
+          caption,
+        },
+        result: resultSend,
+        success: sucesso,
+      });
+    } catch (e) {
+      console.error(
+        '⚠️ Falha ao notificar webhook de envio de vídeo:',
+        e?.message || e
+      );
+    }
+  })();
 
   res.send({ status: sucesso, message: mensagemretorno });
 });

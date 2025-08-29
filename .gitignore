@@ -18,3 +18,4 @@ src/app.ts
 tokens
 yarn.lock
 package-lock.json
+/src/generated/prisma

@@ -13,6 +13,7 @@
     "changelog:update": "conventional-changelog -p angular -i CHANGELOG.md -s",
     "clean": "shx rm -rf session dist",
     "example": "node ./examples/rest/index.js",
+    "dispatcher": "node ./examples/rest/workers/campaignWorker.js",
     "commit": "cz",
     "docs:build": "npm run docs:clean && typedoc && npm run docs:copy-images",
     "docs:clean": "shx rm -rf api-docs",
@@ -93,6 +94,8 @@
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@prisma/client": "^6.15.0",
     "@wppconnect-team/wppconnect": "^1.37.3",
     "@wppconnect/wa-js": "^3.17.7",
     "@wppconnect/wa-version": "^1.5.1804",
@@ -111,6 +114,7 @@
     "logform": "^2.7.0",
     "lookpath": "^1.2.3",
     "mime-types": "^2.1.35",
+    "prisma": "^6.15.0",
     "puppeteer": "^24.14.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
