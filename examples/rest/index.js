@@ -2131,7 +2131,7 @@ app.post('/:session/download-media', async function (req, res) {
 });
 
 // Inicia o servidor
-const porta = '3003';
+const porta = '3001';
 var server = app
   .listen(porta, () => {
     console.log('Servidor iniciado na porta %s', porta);
