@@ -244,7 +244,7 @@ async function createSessionInBackground(sessionName) {
       qrcodesTemp[sessionName] = qr;
       if (client) client.qrCodeData = qr;
       sessionStatus[sessionName] = {
-        status: 'qr_ready',
+        status: 'qr_code',
         message: 'QR Code gerado com sucesso',
       };
       console.log('QR Code capturado e armazenado');
@@ -706,7 +706,7 @@ app.get('/:session/getconnectionstatus', async function (req, res) {
   // Se a sessão está pronta mas ainda não foi inicializada
   if (
     sessionStatus[sessionName] &&
-    sessionStatus[sessionName].status === 'qr_ready'
+    sessionStatus[sessionName].status === 'qr_code'
   ) {
     if (qrcodesTemp[sessionName] && qrcodesTemp[sessionName].base64Image) {
       return res.send({
