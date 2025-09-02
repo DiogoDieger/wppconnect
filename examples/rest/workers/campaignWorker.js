@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const axios = require('axios');
 
 const prisma = new PrismaClient();
-const WHATSAPP_EXTERNAL_API = 'http://localhost:3003';
+const WHATSAPP_EXTERNAL_API = 'http://localhost:3001';
 
 function parsePayload(raw) {
   try {
