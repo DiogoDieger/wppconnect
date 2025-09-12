@@ -21,50 +21,70 @@ function filenameFromUrl(u, fallback) {
     return fallback;
   }
 }
+
 function renderTemplate(text, contactData) {
   if (!text) return '';
   return text.replace(/{{\s*(\w+)\s*}}/g, (_, key) => {
     return contactData[key] ?? '';
   });
 }
+
 async function processNext() {
   const now = new Date();
 
-  const first = await prisma.campaignDispatch.findFirst({
-    where: {
-      status: 'pending',
-      OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
-    },
-    orderBy: [
-      { campaignId: 'asc' },
-      { contact: 'asc' },
-      { messageOrder: 'asc' },
-      { createdAt: 'asc' },
-    ],
-  });
+  let first;
+  try {
+    first = await prisma.campaignDispatch.findFirst({
+      where: {
+        status: 'pending',
+        OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+      },
+      orderBy: [
+        { campaignId: 'asc' },
+        { contact: 'asc' },
+        { messageOrder: 'asc' },
+        { createdAt: 'asc' },
+      ],
+    });
+  } catch (err) {
+    console.error('⚠️ Erro ao consultar Dispatch:', err.message);
+    setTimeout(processNext, 10000);
+    return;
+  }
 
   if (!first) {
-    console.log(
-      '⏸ Nenhuma mensagem pronta para envio, tentando de novo em 5s...'
-    );
+    console.log('⏸ Nenhuma mensagem pronta, tentando de novo em 5s...');
     setTimeout(processNext, 5000);
     return;
   }
-  const contactData = await prisma.segmentContact.findFirst({
-    where: { phone: first.contact }, // ou id, dependendo do seu schema
-    select: { name: true, email: true, empresa: true },
-  });
-  // 2) carrega todas as mensagens desse mesmo contato dentro da mesma campanha
-  const batch = await prisma.campaignDispatch.findMany({
-    where: {
-      status: 'pending',
-      campaignId: first.campaignId,
-      contact: first.contact,
-      sessionName: first.sessionName,
-      OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
-    },
-    orderBy: { messageOrder: 'asc' },
-  });
+
+  let contactData;
+  try {
+    contactData = await prisma.segmentContact.findFirst({
+      where: { phone: first.contact },
+      select: { name: true, email: true, empresa: true },
+    });
+  } catch (err) {
+    console.error('⚠️ Erro ao buscar contato:', err.message);
+  }
+
+  let batch = [];
+  try {
+    batch = await prisma.campaignDispatch.findMany({
+      where: {
+        status: 'pending',
+        campaignId: first.campaignId,
+        contact: first.contact,
+        sessionName: first.sessionName,
+        OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+      },
+      orderBy: { messageOrder: 'asc' },
+    });
+  } catch (err) {
+    console.error('⚠️ Erro ao buscar batch:', err.message);
+    setTimeout(processNext, 5000);
+    return;
+  }
 
   if (!batch.length) {
     setTimeout(processNext, 2000);
@@ -72,32 +92,37 @@ async function processNext() {
   }
 
   console.log(
-    `📦 Processando ${batch.length} mensagens para contato ${first.contact} (campanha ${first.campaignId})`
+    `📦 Processando ${batch.length} mensagens para ${first.contact} (campanha ${first.campaignId})`
   );
 
   // pega delay da campanha
-  const campaign = await prisma.campaing.findUnique({
-    where: { id: first.campaignId },
-    select: { delay: true, contactDelay: true, status: true },
-  });
+  let campaign;
+  try {
+    campaign = await prisma.campaing.findUnique({
+      where: { id: first.campaignId },
+      select: { delay: true, contactDelay: true, status: true },
+    });
+  } catch (err) {
+    console.error('⚠️ Erro ao buscar campanha:', err.message);
+    setTimeout(processNext, 10000);
+    return;
+  }
 
   if (!campaign || campaign.status === 'paused') {
     console.log(
-      `⏸ Campanha ${first.campaignId} está pausada. Retentando em 10s...`
+      `⏸ Campanha ${first.campaignId} está pausada. Tentando de novo em 10s...`
     );
     setTimeout(processNext, 10000);
     return;
   }
 
-  const delayMs = campaign?.delay || 30000; // delay entre mensagens do mesmo contato
+  const delayMs = campaign?.delay || 30000;
   const contactDelayMs = campaign?.contactDelay || 0;
-  console.log(delayMs, contactDelayMs);
 
-  // 3) processa as mensagens desse contato na sequência
   for (const dispatch of batch) {
     const payload = parsePayload(dispatch.message);
     const contact = String(dispatch.contact).replace(/[^\d]/g, '');
-    console.log(payload.type);
+
     try {
       let res;
       switch (payload.type) {
@@ -117,20 +142,18 @@ async function processNext() {
             `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendvideo`,
             {
               telnumber: contact,
-              videoPath: payload.videoUrl, // 👈 campo salvo no banco
+              videoPath: payload.videoUrl,
               filename: filenameFromUrl(payload.videoUrl, 'video.mp4'),
               caption: payload.text || '',
             }
           );
           break;
-
         case 'audio':
           res = await axios.post(
             `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendptt`,
             { telnumber: contact, audioPath: payload.audioUrl }
           );
           break;
-
         case 'document':
           res = await axios.post(
             `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/senddocument`,
@@ -142,10 +165,8 @@ async function processNext() {
             }
           );
           break;
-
         case 'text':
         default: {
-          // 🔹 substitui variáveis no texto
           const finalMessage = renderTemplate(payload.text, {
             nome: contactData?.name,
             email: contactData?.email,
@@ -156,7 +177,6 @@ async function processNext() {
             `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendmessage`,
             { telnumber: contact, message: finalMessage }
           );
-          break;
         }
       }
 
@@ -170,26 +190,28 @@ async function processNext() {
         throw new Error(res?.data?.message || 'Falha no envio');
       }
     } catch (err) {
-      await prisma.campaignDispatch.update({
-        where: { id: dispatch.id },
-        data: { status: 'failed', error: String(err.message || err) },
-      });
-      console.error(`❌ Falhou para ${contact}:`, err.message);
+      console.error(`❌ Erro ao enviar para ${contact}:`, err.message);
+      try {
+        await prisma.campaignDispatch.update({
+          where: { id: dispatch.id },
+          data: { status: 'failed', error: String(err.message || err) },
+        });
+      } catch (e) {
+        console.error('⚠️ Erro ao marcar como failed:', e.message);
+      }
     }
 
-    // delay entre mensagens do mesmo contato
-    console.log(
-      `⏳ Aguardando ${delayMs / 1000}s antes da próxima mensagem...`
-    );
+    console.log(`⏳ Aguardando ${delayMs / 1000}s...`);
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 
   if (contactDelayMs > 0) {
     console.log(
-      `⏳ Aguardando ${contactDelayMs / 1000}s antes do próximo contato...`
+      `⏳ Esperando ${contactDelayMs / 1000}s antes do próximo contato...`
     );
     await new Promise((resolve) => setTimeout(resolve, contactDelayMs));
   }
+
   processNext();
 }
 
