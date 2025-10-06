@@ -7,241 +7,434 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Product {
+  id          Int           @id @default(autoincrement())
+  img         String
+  title       String
+  categoryId  Int
+  description String        @db.Text
+  quantity    Int           @default(1)
+  status      ProductStatus
+  price       Float
+  category    Category      @relation(fields: [categoryId], references: [id])
+
+  @@index([categoryId], map: "Product_categoryId_fkey")
+}
+
+model Category {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  products    Product[]
+}
+
 model User {
-  id                 String  @id @default(cuid())
-  name               String
-  email              String  @unique
-  phone              String
-  profession         String
-  password           String
-  googleAccessToken  String?
-  googleEmail        String?
-  googleRefreshToken String?
+  id                       Int                       @id @default(autoincrement())
+  name                     String?
+  email                    String                    @unique
+  password                 String
+  image_url                String?
+  role                     Role                      @default(SUBSCRIBER)
+  phoneNumber              String?
+  createdAt                DateTime                  @default(now())
+  permissions              Json?
+  updatedAt                DateTime                  @updatedAt
+  appleId                  String?
+  AccessLog                AccessLog[]
+  createdEvents            CalendarEvent[]           @relation("CalendarEventCreator")
+  Campaing                 Campaing[]
+  cashbacks                Cashback[]
+  clientesCriados          Client[]                  @relation("ClientCreator")
+  clientesDirecionados     Client[]                  @relation("ClientVendedor")
+  cobrancasCobrador        CobrancaCobrador[]        @relation("CobradorCobrancas")
+  financeiroVerificacoes   CobrancaCobrador[]        @relation("FinanceiroVerificacoes")
+  extratosUpload           Extrato[]                 @relation("ExtratoUploadedBy")
+  fichasCadastradas        FichaCadastro[]           @relation("FichaCadastroColetor")
+  internalChatsAsUser1     InternalChat[]            @relation("InternalChatUser1")
+  internalChatsAsUser2     InternalChat[]            @relation("InternalChatUser2")
+  internalChatParticipants InternalChatParticipant[] @relation("InternalChatParticipants")
+  internalMessages         InternalMessage[]         @relation("InternalMessageSender")
+  loans                    LoanUser[]
+  messages                 Message[]
+  UserLocation             UserLocation[]
+  VerificacaoPresencial    VerificacaoPresencial[]
+  whatsappContactsAssigned WhatsAppContact[]         @relation("WhatsAppContactAssigned")
+
+  @@index([role], map: "User_role_fkey")
 }
 
-model Company {
-  id      String @id @default(cuid())
-  name    String
-  cnpj    String
-  phone   String
-  address String
+model LoanUser {
+  id                    Int              @id @default(autoincrement())
+  userId                Int
+  loanType              LoanType
+  loanedValue           Float?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime
+  approved              Boolean          @default(false)
+  chatId                String
+  signed                Boolean          @default(false)
+  requestedValue        Float
+  contractId            Int?
+  asaas_customer_id     String?
+  subscription_id       String?
+  generatedInstallments Int              @default(0)
+  paidInstallments      Int              @default(0)
+  totalInstallments     Int              @default(240)
+  chat                  Chat             @relation(fields: [chatId], references: [id])
+  contract              Contract?        @relation(fields: [contractId], references: [id])
+  user                  User             @relation(fields: [userId], references: [id])
+  receipts              PaymentReceipt[]
+
+  @@index([chatId], map: "LoanUser_chatId_fkey")
+  @@index([contractId], map: "LoanUser_contractId_fkey")
+  @@index([userId], map: "LoanUser_userId_fkey")
 }
 
-model Team {
-  id                 String           @id @default(cuid())
-  name               String
-  email              String           @unique
-  position           String
-  password           String?
-  teamId             String?
-  googleAccessToken  String?          @db.Text
-  googleEmail        String?
-  googleRefreshToken String?          @db.Text
-  directorId         String?
-  leads              Lead[]           @relation("LeadCreator")
-  meetings           Meeting[]
-  proposals          Proposal[]       @relation("ProposalCreator")
-  team               TeamGroup?       @relation("TeamMember", fields: [teamId], references: [id])
-  managedTeams       TeamGroup[]      @relation("TeamManager")
-  permissions        TeamPermission[]
+model PaymentReceipt {
+  id          Int      @id @default(autoincrement())
+  loanUserId  Int
+  receiptUrl  String   @db.Text
+  amount      Float
+  installment Int
+  paidAt      DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  loanUser    LoanUser @relation(fields: [loanUserId], references: [id])
 
-  whatsappSessions   WhatsAppSession[]
-  segments Segment[]
-
-  @@index([teamId], map: "Team_teamId_fkey")
-  @@index([directorId], map: "Team_directorId_fkey")
-  campaigns Campaing[]
+  @@index([loanUserId], map: "PaymentReceipt_loanUserId_fkey")
 }
 
-model TeamGroup {
-  id        String   @id @default(cuid())
-  name      String
-  managerId String
+model Cashback {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  cashback  Float
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  members   Team[]   @relation("TeamMember")
-  manager   Team     @relation("TeamManager", fields: [managerId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
 
-  @@index([managerId], map: "TeamGroup_managerId_fkey")
+  @@index([userId], map: "Cashback_userId_fkey")
 }
 
-model TeamPermission {
-  id            String  @id @default(cuid())
-  teamId        String
-  role          String
-  dashboard     Boolean @default(false)
-  whatsapp      Boolean @default(false)
-  propostas     Boolean @default(false)
-  simuladores   Boolean @default(false)
-  relatorios    Boolean @default(false)
-  campanhas     Boolean @default(false)
-  equipe        Boolean @default(false)
-  configuracoes Boolean @default(false)
-  team          Team    @relation(fields: [teamId], references: [id])
-
-  @@index([teamId], map: "TeamPermission_teamId_fkey")
+model Coupon {
+  id              String              @id
+  code            String              @unique
+  discount        Float
+  discountType    Coupon_discountType
+  maxUses         Int                 @default(-1)
+  startAmount     Int                 @default(-1)
+  availableAmount Int                 @default(-1)
+  isActive        Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime
+  productId       Int?
 }
 
-model Lead {
-  id             String     @id @default(cuid())
-  name           String
-  email          String     @unique
-  phone          String
-  ocupation      String
-  potentialValue String
-  observations   String
-  status         String     @default("novos_leads")
-  product        String?
-  createdAt      DateTime   @default(now())
-  createdBy      String?
-  updatedAt      DateTime?  @updatedAt
-  followups      Followup[]
-  creator        Team?      @relation("LeadCreator", fields: [createdBy], references: [id])
-  proposals      Proposal[]
-  simulations    Simulation[]
+model AccessLog {
+  id          Int        @id @default(autoincrement())
+  userId      Int?
+  ip          String
+  city        String?
+  browser     String
+  deviceType  DeviceType
+  isIphone    Boolean
+  createdAt   DateTime   @default(now())
+  deviceBrand String?
+  deviceModel String?
+  user        User?      @relation(fields: [userId], references: [id])
 
-  @@index([createdBy])
+  @@index([userId], map: "AccessLog_userId_fkey")
 }
 
-model Proposal {
-  id                  String         @id @default(cuid())
-  title               String
-  client              String
-  company             String
-  value               String
-  stage               String         @default("pendente_envio")
-  priority            String         @default("medium")
-  dueDate             String?
-  description         String?
-  phone               String
-  email               String
-  leadId              String
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime?      @updatedAt
-  arquivoUrl          String?
-  createdBy           String?
-  acrescentarSeguro   Boolean?
-  creditoUnitario     Float?
-  mesContemplacao     Int?
-  opcaoParcela        String?
-  parcelaContemplacao Float?
-  prazoConsorcio      Int?
-  taxa                Float?
-  imoveis             Property[]
-  proponentes         Proponent[]
-  creator             Team?          @relation("ProposalCreator", fields: [createdBy], references: [id])
-  lead                Lead           @relation(fields: [leadId], references: [id])
-  arquivos            ProposalFile[]
-  simulacoes          Simulation[]
-
-  @@index([leadId], map: "Proposal_leadId_fkey")
-  @@index([createdBy])
-}
-
-model Proponent {
-  id          String   @id @default(cuid())
-  name        String
-  cpf         String
-  email       String
-  phone       String
-  razaoSocial String?
-  proposalId  String
-  proposal    Proposal @relation(fields: [proposalId], references: [id])
-
-  @@index([proposalId], map: "Proponent_proposalId_fkey")
-}
-
-model Property {
-  id          String   @id @default(cuid())
-  address     String
-  value       String
-  description String?
-  proposalId  String
-  proposal    Proposal @relation(fields: [proposalId], references: [id])
-
-  @@index([proposalId], map: "Property_proposalId_fkey")
-}
-
-model ProposalFile {
-  id          String   @id @default(cuid())
-  url         String?  // Manter para compatibilidade com arquivos antigos
-  name        String
-  originalName String?
-  mimeType    String?
-  size        Int?
-  fileData    Bytes?   // Dados do arquivo em binário
-  documentType String? // Tipo do documento (ex: "identificacao", "holerite")
-  proposalId  String
-  createdAt   DateTime @default(now())
-  proposal    Proposal @relation(fields: [proposalId], references: [id])
-
-  @@index([proposalId], map: "ProposalFile_proposalId_fkey")
-}
-
-model Meeting {
-  id             String   @id @default(cuid())
-  title          String
-  description    String?
-  startDateTime  DateTime
-  endDateTime    DateTime
-  duration       Int      @default(60)
-  type           String   @default("meet")
-  status         String   @default("confirmed")
-  meetLink       String?
-  attendees      String?
-  organizerEmail String
-  googleEventId  String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  organizer      Team     @relation(fields: [organizerEmail], references: [email])
-
-  @@index([organizerEmail])
-  @@index([startDateTime])
-  @@index([googleEventId])
-}
-
-model Followup {
-  id              String   @id @default(cuid())
-  observations    String
-  tipeOfContact   String
-  date            DateTime
-  dateNextContact DateTime
-  leadId          String
-  lead            Lead     @relation(fields: [leadId], references: [id])
-
-  @@index([leadId], map: "Followup_leadId_fkey")
-}
-
-model Simulation {
-  id                  String    @id @default(cuid())
-  creditoUnitario     Float
-  taxa                Float
-  prazoConsorcio      Int
-  opcaoParcela        String
-  parcelaContemplacao Float?
-  mesContemplacao     Int?
-  acrescentarSeguro   Boolean
-  createdAt           DateTime  @default(now())
-  proposalId          String?
-  leadId              String?
-  proposal            Proposal? @relation(fields: [proposalId], references: [id])
-  lead                Lead?     @relation(fields: [leadId], references: [id])
-
-  @@index([proposalId], map: "Simulation_proposalId_fkey")
-  @@index([leadId], map: "Simulation_leadId_fkey")
+model Contract {
+  id          Int        @id @default(autoincrement())
+  userId      Int
+  contractUrl String     @db.Text
+  contractId  String
+  signedAt    DateTime?
+  signed      Boolean
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  loanUser    LoanUser[]
 }
 
 model Chat {
-  id          String  @id
-  idfromWpp   String  @db.Text
-  body        String? @db.Text
-  timestamp   String?
-  notifyName  String?
-  from        String?
-  to          String?
-  contactName String?
-  foto        String?
-  mediaUrl    String?
+  id        String     @id
+  createdAt DateTime   @default(now())
+  loanUser  LoanUser[]
+  messages  Message[]
+}
+
+model Message {
+  id              String   @id @default(uuid())
+  text            String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime
+  userId          String
+  chatId          String
+  file            String?
+  image           String?
+  userIdRequested Int
+  chat            Chat     @relation(fields: [chatId], references: [id])
+  user            User     @relation(fields: [userIdRequested], references: [id])
+
+  @@index([chatId], map: "Message_chatId_fkey")
+  @@index([userIdRequested], map: "Message_userIdRequested_fkey")
+}
+
+model Client {
+  id                                 Int                     @id @default(autoincrement())
+  name                               String
+  email                              String                  @unique
+  cpf                                String                  @unique
+  phone                              String
+  purpose                            String?
+  contractTemplate                   String?
+  documentUrl                        String?                 @db.Text
+  status                             Client_status           @default(PENDENTE)
+  createdAt                          DateTime                @default(now())
+  updatedAt                          DateTime                @updatedAt
+  criadoPor                          Int?
+  agendamentoAtendimento             DateTime?
+  bairro                             String                  @default("")
+  banco                              String?
+  cep                                String                  @default("")
+  certidaoCasamentoUrl               Json?
+  chavePix                           String?
+  cidade                             String                  @default("")
+  comprovanteEnderecoUrl             Json?
+  comprovanteRendaUrl                Json?
+  contratoAluguelUrl                 String?                 @db.Text
+  creditoSolicitado                  Float                   @default(0)
+  dataVencimento                     DataVencimento          @default(DIA_05)
+  debitoAnexo                        Json?
+  debitosCpf                         String?                 @db.Text
+  destinatarioPix                    String?
+  documentoFotoUrl                   Json?
+  empresa                            String?
+  endereco                           String                  @default("")
+  numero                             String?
+  complemento                        String?
+  enderecoEmpresa                    String?                 @db.Text
+  estado                             String                  @default("")
+  fonteRenda                         FonteRenda              @default(REGISTRADO)
+  horarioTrabalho                    String?
+  iptuUrl                            Json?
+  mediaExtratos                      Float?
+  observacaoResidencia               String?                 @db.Text
+  quantidadeParcelas                 Int                     @default(12)
+  resumoChatgpt                      String?                 @db.Text
+  rg                                 String?
+  somaExtratos                       Float?
+  statusCliente                      StatusCliente           @default(CASA_PROPRIA_QUITADA)
+  tipoNegociacao                     Client_tipoNegociacao   @default(NOVA)
+  valorFinanciamentoAluguel          Float?
+  valorLiquidoRecebido               Float?
+  arquivoContratoUrl                 Json?
+  contratoAssinadoDigitalUrl         Json?
+  referencia1Bairro                  String?
+  referencia1Cep                     String?
+  referencia1Cidade                  String?
+  referencia1Estado                  String?
+  referencia1FotoUrl                 Json?
+  referencia1Nome                    String?                 @db.Text
+  referencia1Numero                  String?
+  referencia1Parentesco              String?
+  referencia1Rua                     String?
+  referencia1Telefone                String?
+  referencia2Bairro                  String?
+  referencia2Cep                     String?
+  referencia2Cidade                  String?
+  referencia2Estado                  String?
+  referencia2FotoUrl                 Json?
+  referencia2Nome                    String?                 @db.Text
+  referencia2Numero                  String?
+  referencia2Parentesco              String?
+  referencia2Rua                     String?
+  referencia2Telefone                String?
+  selfieResidenciaUrl                Json?
+  motivoReprovacao                   String?
+  observacaoAprovacao                String?                 @db.Text
+  dataAtendimento                    DateTime?
+  observacoesAtendimento             String?                 @db.Text
+  observacaoReprovacao               String?                 @db.Text
+  motivoReprovacaoSecretario         String?
+  observacaoAprovacaoSecretario      String?                 @db.Text
+  observacaoReprovacaoSecretario     String?                 @db.Text
+  dataAtendimentoDoutor              DateTime?
+  dataLiberacaoPagamento             DateTime?
+  dataVencimentoBoleto               DateTime?
+  linkBoleto                         String?                 @db.Text
+  motivoReprovacaoDoutor             String?
+  observacaoAprovacaoDoutor          String?                 @db.Text
+  observacaoAtendimentoDoutor        String?                 @db.Text
+  observacaoFinanceiroBoleto         String?                 @db.Text
+  observacaoFinanceiroFinal          String?                 @db.Text
+  observacaoReprovacaoDoutor         String?                 @db.Text
+  pdfBoletoUrl                       String?                 @db.Text
+  statusAtendimentoDoutor            String?                 @default("AGENDADO")
+  valorBoleto                        Float?
+  valorLiberado                      Float?
+  comprovantePagamentoUrl            String?                 @db.Text
+  boletosGeradosUrl                  Json?
+  dataVencimentoRenegociacao         DataVencimento?
+  horarioAtendimentoRenegociacao     String?
+  linkBoletosAsaas                   String?                 @db.Text
+  observacaoDoutorRenegociacao       String?                 @db.Text
+  observacaoFinanceiroRenegociacao   String?                 @db.Text
+  observacaoRenegociador             String?                 @db.Text
+  observacaoSecretariaRenegociacao   String?                 @db.Text
+  precisaDoutor                      Boolean?                @default(false)
+  quantidadeParcelasAprovadas        Int?
+  resumoBoletosPagos                 String?                 @db.Text
+  valorLiberadoRenegociacao          Float?
+  valorParcelaRenegociacao           Float?
+  agendamentoAtendimentoRenegociacao DateTime?
+  dataDirecionamentoGerente          DateTime?
+  direcionadoParaVendedor            Int?
+  observacaoGerenteRenegociacao      String?                 @db.Text
+  clienteGoogleMaps                  String?                 @db.Text
+  referencia1GoogleMaps              String?                 @db.Text
+  referencia2GoogleMaps              String?                 @db.Text
+  valorParcela                       Float?
+  mesPrimeiroPagamento               String?
+  fotoSegurandoPromissoriaUrl        Json?
+  fotoPromissoriaAssinadaUrl         Json?
+  contestadoPor                      Int?
+  dataContestacao                    DateTime?
+  dataRevisaoContestacao             DateTime?
+  observacaoContestacao              String?                 @db.Text
+  observacaoFinanceiroContestacao    String?                 @db.Text
+  revisadoPor                        Int?
+  dataNaoQuis                        DateTime?
+  dataParouResponder                 DateTime?
+  observacaoNaoQuis                  String?                 @db.Text
+  statusAnteriorParouResponder       Client_status?
+  dataReprovacaoGerente              DateTime?
+  motivoReprovacaoGerente            String?                 @db.Text
+  reprovadoPorGerente                Int?
+  observacaoReprovacaoGerente        String?                 @db.Text
+  dataReprovacaoSecretario           DateTime?
+  reprovadoPorSecretario             Int?
+  events                             CalendarEvent[]
+  criador                            User?                   @relation("ClientCreator", fields: [criadoPor], references: [id])
+  vendedorDirecionado                User?                   @relation("ClientVendedor", fields: [direcionadoParaVendedor], references: [id])
+  UserLocation                       UserLocation[]
+  VerificacaoPresencial              VerificacaoPresencial[]
+
+  @@index([email])
+  @@index([cpf])
+  @@index([statusCliente])
+  @@index([fonteRenda])
+  @@index([criadoPor])
+  @@index([direcionadoParaVendedor], map: "Client_direcionadoParaVendedor_fkey")
+}
+
+model VerificacaoPresencial {
+  id                    Int            @id @default(autoincrement())
+  clientId              Int
+  verificadoPor         Int?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  audioPrincipal        String?        @db.Text
+  audiosExtras          Json?
+  consideracoesCobrador String?        @db.Text
+  consideracoesFinais   String?        @db.Text
+  dataCobranca          DateTime
+  dataPagamento         DateTime
+  fotosLocal            Json?
+  numeroParcela         Int
+  ondeFoiCobrado        OndeFoiCobrado
+  outrosAnexos          Json?
+  pixEnviado            String?        @db.Text
+  printsWhatsapp        Json?
+  quemFoiCobrado        QuemFoiCobrado
+  statusCobranca        StatusCobranca
+  valorPago             Float
+  valorParcela          Float
+  vencimentoParcela     DateTime
+  client                Client         @relation(fields: [clientId], references: [id])
+  usuario               User?          @relation(fields: [verificadoPor], references: [id])
+
+  @@index([clientId])
+  @@index([statusCobranca])
+  @@index([dataCobranca])
+  @@index([verificadoPor], map: "VerificacaoPresencial_verificadoPor_fkey")
+}
+
+model InternalChat {
+  id           String                    @id @default(uuid())
+  type         InternalChatType
+  title        String
+  description  String?
+  isActive     Boolean                   @default(true)
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  isPrivate    Boolean                   @default(false)
+  user1Id      Int?
+  user2Id      Int?
+  user1        User?                     @relation("InternalChatUser1", fields: [user1Id], references: [id])
+  user2        User?                     @relation("InternalChatUser2", fields: [user2Id], references: [id])
+  participants InternalChatParticipant[]
+  messages     InternalMessage[]
+
+  @@index([type])
+  @@index([isActive])
+  @@index([isPrivate])
+  @@index([user1Id])
+  @@index([user2Id])
+}
+
+model InternalMessage {
+  id        String       @id @default(uuid())
+  content   String       @db.Text
+  chatId    String
+  senderId  Int
+  readBy    Json?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  chat      InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender    User         @relation("InternalMessageSender", fields: [senderId], references: [id])
+
+  @@index([chatId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+model InternalChatParticipant {
+  id            String       @id @default(uuid())
+  chatId        String
+  userId        Int
+  joinedAt      DateTime     @default(now())
+  lastReadAt    DateTime?
+  isActive      Boolean      @default(true)
+  canWrite      Boolean      @default(true)
+  notifications Boolean      @default(true)
+  chat          InternalChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user          User         @relation("InternalChatParticipants", fields: [userId], references: [id])
+
+  @@unique([chatId, userId])
+  @@index([chatId])
+  @@index([userId])
+}
+
+model CalendarEvent {
+  id          String   @id @default(uuid())
+  title       String
+  description String?  @db.Text
+  startDate   DateTime
+  endDate     DateTime
+  clientId    Int?
+  createdBy   Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  client      Client?  @relation(fields: [clientId], references: [id])
+  creator     User     @relation("CalendarEventCreator", fields: [createdBy], references: [id])
+
+  @@index([startDate])
+  @@index([clientId])
+  @@index([createdBy])
 }
 
 model WhatsAppSession {
@@ -253,21 +446,12 @@ model WhatsAppSession {
   lastConnected    DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
-  phoneNumber      String?          
-  formattedNumber  String?     
-
-  // Relacionamento com Team (user)
-  userId           String?
-  user             Team?              @relation(fields: [userId], references: [id])
-
   contacts         WhatsAppContact[]
   messages         WhatsAppMessage[]
 
   @@index([sessionName])
   @@index([isActive])
-  @@index([userId])
 }
-
 
 model WhatsAppContact {
   id               String               @id @default(uuid())
@@ -282,6 +466,7 @@ model WhatsAppContact {
   lastMessageAt    DateTime?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
+  assignedTo       User?                @relation("WhatsAppContactAssigned", fields: [assignedToUserId], references: [id])
   session          WhatsAppSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   tags             WhatsAppContactTag[]
   messages         WhatsAppMessage[]
@@ -351,103 +536,494 @@ model WhatsAppContactTag {
   @@index([tagId])
 }
 
-model Campaing {
-  id           String              @id @default(uuid())
-  name         String
-  delay        Int                 @default(30000)
-  contactDelay Int                 @default(10000)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  userId String?
-   status       String              @default("active") 
-  user   Team? @relation(fields: [userId], references: [id])
+model FichaCadastro {
+  id             Int            @id @default(autoincrement())
+  numero         String         @unique
+  nome           String
+  cpf            String         @unique
+  endereco       String
+  whatsapp       String
+  tipoResidencia TipoResidencia
+  fonteRenda     FonteRenda
+  mediaSalarial  Float
+  arquivosUrl    Json?
+  criadoPor      Int
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  bairro         String?
+  cep            String?
+  cidade         String?
+  complemento    String?
+  estado         String?
+  rua            String?
+  numeroEndereco String?
+  coletor        User           @relation("FichaCadastroColetor", fields: [criadoPor], references: [id])
 
+  @@index([cpf])
+  @@index([numero])
+  @@index([criadoPor])
+}
+
+model Cobranca {
+  id                     Int                @id @default(autoincrement())
+  clienteNome            String
+  clienteEmail           String?
+  clienteCpf             String?
+  clientePhone           String?
+  valorOriginal          Float
+  valorAtualizado        Float?
+  valorLiquido           Float?
+  juros                  Float              @default(0)
+  multa                  Float              @default(0)
+  desconto               Float              @default(0)
+  dataVencimento         DateTime
+  dataVencimentoOriginal DateTime?
+  dataPagamento          DateTime?
+  dataEstimadaCredito    DateTime?
+  dataConfirmacao        DateTime?
+  dataCredito            DateTime?
+  dataPromissoria        DateTime?
+  status                 Cobranca_status    @default(PENDENTE)
+  numeroDocumento        String?
+  numeroBoleto           String?
+  numeroFatura           String?
+  descricao              String?
+  identificadorExterno   String?
+  emailsAdicionais       String?
+  formaPagamento         String?
+  tipoCobranca           String?
+  grupos                 String?
+  usuario                String?
+  uploadId               String?
+  observacoes            String?
+  audioUrl               String?            @db.Text
+  resumoCobranca         String?            @db.Text
+  fotoResidenciaUrl      String?            @db.Text
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  cobrancasCobrador      CobrancaCobrador[]
+
+  @@index([clienteCpf])
+  @@index([clienteEmail])
+  @@index([status])
+  @@index([dataVencimento])
+  @@index([uploadId])
+}
+
+model CobrancaCobrador {
+  id                           Int                          @id @default(autoincrement())
+  cobrancaId                   Int
+  cobradorId                   Int
+  status                       CobrancaCobrador_status
+  observacoes                  String?                      @db.Text
+  dataPromissoria              DateTime?
+  resumoCobranca               String?                      @db.Text
+  dataCobranca                 DateTime                     @default(now())
+  tipoContato                  CobrancaCobrador_tipoContato
+  resultadoCobranca            ResultadoCobranca
+  proximaAcao                  String?                      @db.Text
+  valorPago                    Float?
+  formaPagamento               String?
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+  comprovantePagamentoUrl      String?                      @db.Text
+  dataVerificacaoFinanceiro    DateTime?
+  financeiroId                 Int?
+  observacoesFinanceiro        String?                      @db.Text
+  precisaVerificacaoFinanceiro Boolean                      @default(false)
+  verificadoPorFinanceiro      Boolean                      @default(false)
+  totalParcelas                Int?
+  ultimaParcela                DateTime?
+  valorParcialPago             Float?
+  valorRestante                Float?
+  audioUrls                    Json?
+  fotoResidenciaUrls           Json?
+  comprovantePagamentoUrls     Json?
+  printsWhatsappUrls           Json?
+  cobrador                     User                         @relation("CobradorCobrancas", fields: [cobradorId], references: [id])
+  cobranca                     Cobranca                     @relation(fields: [cobrancaId], references: [id], onDelete: Cascade)
+  financeiro                   User?                        @relation("FinanceiroVerificacoes", fields: [financeiroId], references: [id])
+
+  @@index([cobrancaId])
+  @@index([cobradorId])
+  @@index([dataCobranca])
+  @@index([status])
+  @@index([precisaVerificacaoFinanceiro])
+  @@index([verificadoPorFinanceiro])
+  @@index([financeiroId], map: "CobrancaCobrador_financeiroId_fkey")
+}
+
+model Extrato {
+  id              Int           @id @default(autoincrement())
+  dataTransacao   DateTime
+  historico       String        @db.Text
+  descricao       String?       @db.Text
+  numeroDocumento String?
+  valor           Float
+  tipoMovimento   TipoMovimento
+  categoria       String?
+  saldoAnterior   Float?
+  saldoAtual      Float?
+  banco           String?
+  agencia         String?
+  conta           String?
+  cpfCnpj         String?
+  nomeContraparte String?
+  codigoOperacao  String?
+  uploadId        String?
+  arquivoOriginal String?
+  uploadedBy      Int?
+  observacoes     String?       @db.Text
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  usuario         User?         @relation("ExtratoUploadedBy", fields: [uploadedBy], references: [id])
+
+  @@index([dataTransacao])
+  @@index([tipoMovimento])
+  @@index([uploadId])
+  @@index([uploadedBy])
+}
+
+model AppUser {
+  id           String   @id
+  email        String   @unique
+  passwordHash String   @db.VarChar(255)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+}
+
+model LocationConsent {
+  id          String    @id
+  appUserId   String    @unique
+  consented   Boolean   @default(false)
+  consentedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime
+}
+
+model UserLocation {
+  id         Int      @id @default(autoincrement())
+  lat        Float
+  lng        Float
+  accuracy   Float?
+  address    String?  @db.VarChar(512)
+  recordedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  userId     Int?
+  clientId   Int?
+  Client     Client?  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  User       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, recordedAt])
+  @@index([clientId, recordedAt])
+}
+
+model Campaing {
+  id           String             @id @default(uuid())
+  name         String
+  delay        Int                @default(30000)
+  contactDelay Int                @default(10000)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  userId       Int?
+  status       String             @default("active")
+  user         User?              @relation(fields: [userId], references: [id])
   templates    CampaingTemplate[]
+
+  @@index([userId], map: "Campaing_userId_fkey")
 }
 
 model Template {
-  id        String              @id @default(uuid())
+  id        String             @id @default(uuid())
   name      String
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
   campaings CampaingTemplate[]
   messages  TemplateMessage[]
 }
 
 model TemplateMessage {
   id          String   @id @default(uuid())
-  text        String?   @db.Text
-  audioUrl    String?   @db.Text
-  imageUrl    String?   @db.Text
-  videoUrl    String?   @db.Text
-  documentUrl String?   @db.Text
+  text        String?  @db.Text
+  audioUrl    String?  @db.Text
+  imageUrl    String?  @db.Text
+  videoUrl    String?  @db.Text
+  documentUrl String?  @db.Text
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
   templateId  String
   template    Template @relation(fields: [templateId], references: [id])
+
+  @@index([templateId], map: "TemplateMessage_templateId_fkey")
 }
 
 model CampaingTemplate {
   campaingId String
   templateId String
-
   campaing   Campaing @relation(fields: [campaingId], references: [id])
   template   Template @relation(fields: [templateId], references: [id])
 
-  @@id([campaingId, templateId]) // Chave composta primária
+  @@id([campaingId, templateId])
+  @@index([templateId], map: "CampaingTemplate_templateId_fkey")
 }
-//
 
-model KbMessage {
-  id        String   @id @default(cuid())
-  userId    String
-  question  String
-  answer    String   @db.Text
-  citations Json?    // ← array de objetos { file_id, quote }
-  createdAt DateTime @default(now())
-
-  @@index([userId, createdAt(desc)])
-}
 model Segment {
-  id          String            @id @default(cuid())
+  id          String           @id @default(cuid())
   name        String
   description String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-
-  // Dono do segmento
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
   userId      String
-  user        Team              @relation(fields: [userId], references: [id])
-
   contacts    SegmentContact[]
+
+  @@index([userId], map: "Segment_userId_fkey")
 }
 
 model SegmentContact {
-  id          String   @id @default(cuid())
-  segmentId   String
-  segment     Segment  @relation(fields: [segmentId], references: [id])
+  id        String  @id @default(cuid())
+  segmentId String
+  name      String?
+  phone     String
+  email     String?
+  empresa   String?
+  extraData Json?
+  segment   Segment @relation(fields: [segmentId], references: [id])
 
-  name        String?
-  phone       String
-  email       String?
-  empresa     String?
-  extraData   Json?     // flexível para armazenar colunas extras do Excel
+  @@index([segmentId], map: "SegmentContact_segmentId_fkey")
 }
 
 model CampaignDispatch {
-  id             String   @id @default(uuid())
-  campaignId     String
-  sessionName    String
-  contact        String
-  message        String   @db.Text
-  status         String   @default("pending")
-  error          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id           String    @id @default(uuid())
+  campaignId   String
+  sessionName  String
+  contact      String
+  message      String    @db.Text
+  status       String    @default("pending")
+  error        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  messageOrder Int?
+  scheduledAt  DateTime?
+}
 
-  // 👇 nova coluna: ordem da mensagem (baseada no TemplateMessage.createdAt)
-  messageOrder   Int?
-  scheduledAt    DateTime?
+enum TipoMovimento {
+  CREDITO
+  DEBITO
+}
+
+enum TipoResidencia {
+  PROPRIA
+  ALUGADA
+  MORA_COM_TERCEIROS
+}
+
+enum LoanType {
+  SIGNATURECLUB
+}
+
+enum DeviceType {
+  MOBILE
+  DESKTOP
+}
+
+enum ProductStatus {
+  IN_STOCK
+  OUT_STOCK
+}
+
+enum Role {
+  SUBSCRIBER
+  VENDEDOR
+  GERENTE
+  SECRETARIO
+  ADMINISTRADOR
+  COBRADOR
+  FINANCEIRO
+  DOUTOR
+  ADMIN
+  COLETOR
+}
+
+enum Coupon_discountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum StatusCliente {
+  CASA_PROPRIA_QUITADA
+  CASA_PROPRIA_FINANCIADA
+  CASA_CONJUGE
+  CASA_PAI_MAE
+  CASA_OUTRO_FAMILIAR
+  ALUGUEL_IMOBILIARIA
+  ALUGUEL_CONTRATO_PARTICULAR
+  ALUGUEL_SEM_CONTRATO
+}
+
+enum FonteRenda {
+  REGISTRADO
+  APOSENTADO
+  AUTONOMO
+}
+
+enum DataVencimento {
+  DIA_05
+  DIA_10
+  DIA_15
+  DIA_20
+  DIA_25
+  DIA_30
+}
+
+enum StatusCobranca {
+  PAGOU_BOLETO_INTEGRAL
+  PAGOU_PARTE_VIA_PIX
+  PAGOU_PARTE_NO_ESCRITORIO
+  VAI_PAGAR_HOJE
+  REAGENDOU
+  EM_ANDAMENTO
+}
+
+enum ResultadoCobranca {
+  CONTATO_ESTABELECIDO
+  CLIENTE_NAO_ENCONTRADO
+  CLIENTE_INDISPONIVEL
+  PROMESSA_PAGAMENTO
+  PAGAMENTO_PARCIAL
+  PAGAMENTO_INTEGRAL
+  REAGENDAMENTO
+  RECUSA_PAGAMENTO
+  CLIENTE_FALECIDO
+  ENDERECO_INCORRETO
+  TELEFONE_INCORRETO
+  OUTROS
+}
+
+enum QuemFoiCobrado {
+  O_PROPRIO_DEVEDOR
+  PAI
+  MAE
+  IRMAO
+  CONJUGE
+  FILHO
+  SOGRO
+  TIO
+  PRIMO
+  CUNHADO
+  VIZINHO
+  AMIGO
+  AVALISTA
+}
+
+enum OndeFoiCobrado {
+  TELEFONE
+  PRESENCIAL_RESIDENCIA
+  PRESENCIAL_TRABALHO
+  PRESENCIAL_RESIDENCIA_CONTATOS
+  PRESENCIAL_NO_ESCRITORIO
+}
+
+enum InternalChatType {
+  VENDEDOR_GERENTE
+  SECRETARIO_GERENTE
+  COBRADOR_SECRETARIO
+  GERAL_ADMINISTRACAO
+}
+
+enum Client_status {
+  PRE_ATENDIMENTO
+  APROVADO_GERENTE
+  POS_APROVACAO
+  APROVADO_GERENTE_FINAL
+  APROVADO_FINANCEIRO_BOLETO
+  APROVADO_SECRETARIO_REFERENCIAS
+  APROVADO_DOUTOR
+  AGUARDANDO_SELFIE_CLIENTE
+  APROVADO_SECRETARIO_FINAL
+  APROVADO_FINANCEIRO_FINAL
+  REPROVADO
+  REPROVADO_SECRETARIO
+  REPROVADO_DOUTOR
+  PENDENTE
+  APROVADO
+  EM_ANALISE
+  FINALIZADO
+  APROVADO_SECRETARIO
+  PAGAMENTO_ENVIADO
+  NAO_RESPONDEU
+  RENEGOCIACAO_PRE_ATENDIMENTO
+  RENEGOCIACAO_APROVADO_FINANCEIRO
+  RENEGOCIACAO_REPROVADO_FINANCEIRO
+  RENEGOCIACAO_APROVADO_GERENTE
+  RENEGOCIACAO_POS_APROVACAO
+  RENEGOCIACAO_APROVADO_GERENTE_FINAL
+  RENEGOCIACAO_APROVADO_FINANCEIRO_BOLETO
+  RENEGOCIACAO_APROVADO_SECRETARIO_REFERENCIAS
+  RENEGOCIACAO_APROVADO_DOUTOR
+  RENEGOCIACAO_AGUARDANDO_SELFIE_CLIENTE
+  RENEGOCIACAO_APROVADO_SECRETARIO_FINAL
+  RENEGOCIACAO_SECRETARIO_REFERENCIAS
+  RENEGOCIACAO_SECRETARIO_FINAL
+  RENEGOCIACAO_APROVADO_FINANCEIRO_FINAL
+  RENEGOCIACAO_REPROVADO
+  RENEGOCIACAO_REPROVADO_SECRETARIO
+  RENEGOCIACAO_FINANCEIRO_BOLETO
+  RENEGOCIACAO_DOUTOR_APROVADO
+  RENEGOCIACAO_REPROVADO_DOUTOR
+  RENEGOCIACAO_PENDENTE
+  RENEGOCIACAO_EM_ANALISE
+  RENEGOCIACAO_FINALIZADO
+  RENEGOCIACAO_APROVADO_SECRETARIO
+  RENEGOCIACAO_PAGAMENTO_ENVIADO
+  RENEGOCIACAO_PARCELAS_APROVADO_FINANCEIRO
+  RENEGOCIACAO_PARCELAS_REPROVADO_FINANCEIRO
+  RENEGOCIACAO_PARCELAS_DIRECIONADO_GERENTE
+  RENEGOCIACAO_CONTESTACAO_FINANCEIRO
+  RENEGOCIACAO_CONTESTACAO_APROVADA_FINANCEIRO
+  RENEGOCIACAO_PAROU_DE_RESPONDER
+  RENEGOCIACAO_NAO_QUIS
+  RENEGOCIACAO_REPROVADO_GERENTE
+}
+
+enum Client_tipoNegociacao {
+  NOVA
+  RENEGOCIACAO
+}
+
+enum CobrancaCobrador_status {
+  PENDENTE
+  VENCIDO
+  PAGO
+  CANCELADO
+  EM_ANALISE
+  AGUARDANDO_PAGAMENTO
+  PAGAMENTO_PARCIAL
+  REAGENDOU
+  RECUSADO_FINANCEIRO
+}
+
+enum CobrancaCobrador_tipoContato {
+  TELEFONE
+  WHATSAPP
+  PRESENCIAL_RESIDENCIA
+  PRESENCIAL_TRABALHO
+  PRESENCIAL_ESCRITORIO
+  PRESENCIAL_ENDERECO_REFERENCIA
+  WHATSAPP_REFERENCIA
+  EMAIL
+  SMS
+  OUTROS
+}
+
+enum Cobranca_status {
+  PENDENTE
+  VENCIDO
+  PAGO
+  CANCELADO
+  EM_ANALISE
+  AGUARDANDO_PAGAMENTO
+  PAGAMENTO_PARCIAL
+  REAGENDOU
+  RECUSADO_FINANCEIRO
 }
