@@ -122,13 +122,17 @@ async function processNext() {
   for (const dispatch of batch) {
     const payload = parsePayload(dispatch.message);
     const contact = String(dispatch.contact).replace(/[^\d]/g, '');
-
+    const session = await prisma.whatsAppSession.findUnique({
+      where: {
+        id: dispatch.sessionName,
+      },
+    });
     try {
       let res;
       switch (payload.type) {
         case 'image':
           res = await axios.post(
-            `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendimage`,
+            `${WHATSAPP_EXTERNAL_API}/${session.sessionName}/sendimage`,
             {
               telnumber: contact,
               imagePath: payload.imageUrl,
@@ -139,7 +143,7 @@ async function processNext() {
           break;
         case 'video':
           res = await axios.post(
-            `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendvideo`,
+            `${WHATSAPP_EXTERNAL_API}/${session.sessionName}/sendvideo`,
             {
               telnumber: contact,
               videoPath: payload.videoUrl,
@@ -150,13 +154,13 @@ async function processNext() {
           break;
         case 'audio':
           res = await axios.post(
-            `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendptt`,
+            `${WHATSAPP_EXTERNAL_API}/${session.sessionName}/sendptt`,
             { telnumber: contact, audioPath: payload.audioUrl }
           );
           break;
         case 'document':
           res = await axios.post(
-            `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/senddocument`,
+            `${WHATSAPP_EXTERNAL_API}/${session.sessionName}/senddocument`,
             {
               telnumber: contact,
               filePath: payload.documentUrl,
@@ -172,9 +176,9 @@ async function processNext() {
             email: contactData?.email,
             empresa: contactData?.empresa,
           });
-          console.log(dispatch.sessionName, 'SN');
+
           res = await axios.post(
-            `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendmessage`,
+            `${WHATSAPP_EXTERNAL_API}/${session.sessionName}/sendmessage`,
             { telnumber: contact, message: finalMessage }
           );
         }
