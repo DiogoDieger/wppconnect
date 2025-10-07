@@ -172,7 +172,7 @@ async function processNext() {
             email: contactData?.email,
             empresa: contactData?.empresa,
           });
-
+          console.log(dispatch.sessionName, 'SN');
           res = await axios.post(
             `${WHATSAPP_EXTERNAL_API}/${dispatch.sessionName}/sendmessage`,
             { telnumber: contact, message: finalMessage }
