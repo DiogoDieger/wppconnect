@@ -1,7 +1,7 @@
 const express = require('express');
 const app = express();
 const wppconnect = require('@wppconnect-team/wppconnect');
-const WEBHOOK_URL = 'https://www.trianguloempresa.com/api/whatsappwebhook'; // substitua pela sua!
+const WEBHOOK_URL = 'http://localhost:3000/api/whatsappwebhook'; // substitua pela sua!
 const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
@@ -30,6 +30,122 @@ function filenameFromUrl(u, fallback = 'imagem.jpg') {
     return fallback;
   }
 }
+
+// === Fila de envios de vídeo (background) ===
+const videoJobStore = new Map(); // jobId -> { status, sessionName, telnumber, videoPath, filename, caption, result, error, createdAt, updatedAt }
+const videoQueues = new Map(); // sessionName -> [jobId, ...]
+const videoBusy = new Set(); // sessions em processamento
+
+function enqueueVideoJob(sessionName, data) {
+  const jobId = `video_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date();
+  videoJobStore.set(jobId, {
+    ...data,
+    status: 'queued',
+    createdAt: now,
+    updatedAt: now,
+    result: null,
+    error: null,
+  });
+  if (!videoQueues.has(sessionName)) videoQueues.set(sessionName, []);
+  videoQueues.get(sessionName).push(jobId);
+
+  // dispara o worker dessa sessão
+  setImmediate(() => processVideoQueue(sessionName));
+  return jobId;
+}
+
+async function processVideoQueue(sessionName) {
+  if (videoBusy.has(sessionName)) return; // já processando
+  videoBusy.add(sessionName);
+
+  try {
+    const queue = videoQueues.get(sessionName) || [];
+    while (queue.length) {
+      const jobId = queue.shift();
+      const job = videoJobStore.get(jobId);
+      if (!job) continue;
+
+      job.status = 'sending';
+      job.updatedAt = new Date();
+
+      try {
+        const client = await getOrCreateSession(sessionName);
+        const state = await client.getConnectionState();
+        if (state !== 'CONNECTED') throw new Error('Sessão não conectada');
+
+        const tel = String(job.telnumber || '').replace(/\D/g, '');
+        const wid = tel + '@c.us';
+        const number = await client.checkNumberStatus(wid);
+        if (!number || !number.canReceiveMessage)
+          throw new Error('Número indisponível ou bloqueado');
+
+        const result = await client.sendFile(
+          number.id._serialized,
+          job.videoPath,
+          job.filename || 'video.mp4',
+          job.caption || ''
+        );
+
+        job.status = 'success';
+        job.result = { id: result?.id };
+        job.updatedAt = new Date();
+
+        // notifica webhook, mas não bloqueia
+        axios
+          .post(WEBHOOK_URL, {
+            event: 'sent',
+            session: sessionName,
+            telnumber: tel,
+            message: {
+              type: 'video',
+              filename: job.filename || 'video.mp4',
+              filePath: job.videoPath,
+              caption: job.caption || '',
+            },
+            result,
+            success: true,
+          })
+          .catch(() => {});
+      } catch (err) {
+        job.status = 'error';
+        job.error = err?.message || String(err);
+        job.updatedAt = new Date();
+
+        // notifica webhook de erro (não bloqueia)
+        axios
+          .post(WEBHOOK_URL, {
+            event: 'sent',
+            session: sessionName,
+            telnumber: String(job.telnumber || '').replace(/\D/g, ''),
+            message: {
+              type: 'video',
+              filename: job.filename || 'video.mp4',
+              filePath: job.videoPath,
+              caption: job.caption || '',
+            },
+            result: { error: job.error },
+            success: false,
+          })
+          .catch(() => {});
+      }
+    }
+  } finally {
+    videoBusy.delete(sessionName);
+  }
+}
+
+// limpeza opcional (remove jobs finalizados há 6h)
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, j] of videoJobStore.entries()) {
+    const done = j.status === 'success' || j.status === 'error';
+    if (done && now - new Date(j.updatedAt).getTime() > 6 * 60 * 60 * 1000) {
+      videoJobStore.delete(id);
+    }
+  }
+}, 30 * 60 * 1000);
+
 async function safeGetAvatar(client, jid) {
   if (!jid) return null;
 
@@ -1457,9 +1573,9 @@ app.get('/:session/history', async function (req, res) {
   }
   res.send({ status: sucesso, messages });
 });
-// Endpoint para enviar vídeo
+// Endpoint para enviar vídeo (assíncrono via fila)
 app.post('/:session/sendvideo', async function (req, res) {
-  console.log('--- Nova requisição /sendvideo ---');
+  console.log('--- Nova requisição /sendvideo (async) ---');
 
   const sessionName = req.params.session;
   const telnumberRaw = req.body.telnumber; // pode vir com símbolos
@@ -1467,93 +1583,31 @@ app.post('/:session/sendvideo', async function (req, res) {
   const filename = req.body.filename || 'video.mp4';
   const caption = req.body.caption || '';
 
-  console.log('Session recebida:', sessionName);
-  console.log('Número recebido:', telnumberRaw);
-  console.log('Arquivo recebido:', videoPath);
-
-  // normaliza número: só dígitos
-  const telnumber = String(telnumberRaw || '').replace(/\D/g, '');
-
-  const client = await getOrCreateSession(sessionName);
-  console.log('Cliente retornado de getOrCreateSession:', typeof client);
-
-  let mensagemretorno = '';
-  let sucesso = false;
-  let resultSend = null;
-
-  try {
-    if (typeof client === 'object') {
-      const status = await client.getConnectionState();
-      console.log(`Status da conexão da sessão [${sessionName}]:`, status);
-
-      if (status === 'CONNECTED') {
-        const wid = telnumber + '@c.us';
-        let numeroexiste = await client.checkNumberStatus(wid);
-        console.log('Resultado do checkNumberStatus:', numeroexiste);
-
-        if (numeroexiste && numeroexiste.canReceiveMessage === true) {
-          console.log('Número pode receber vídeo, enviando...');
-
-          await client
-            .sendFile(numeroexiste.id._serialized, videoPath, filename, caption)
-            .then((result) => {
-              console.log('✅ Vídeo enviado com sucesso:', result);
-              sucesso = true;
-              resultSend = result;
-              mensagemretorno = result.id;
-            })
-            .catch((erro) => {
-              console.error('❌ Erro ao enviar vídeo:', erro);
-              mensagemretorno = 'Erro interno ao enviar vídeo';
-            });
-        } else {
-          console.warn('⚠️ O número não está disponível ou bloqueado');
-          mensagemretorno =
-            'O número não está disponível ou está bloqueado - The number is not available or is blocked.';
-        }
-      } else {
-        console.warn('⚠️ Sessão não conectada:', status);
-        mensagemretorno =
-          'Valide sua conexão com a internet ou QRCODE - Validate your internet connection or QRCODE';
-      }
-    } else {
-      console.error('❌ Cliente inválido, não inicializado');
-      mensagemretorno =
-        'A instância não foi inicializada - The instance was not initialized';
-    }
-  } catch (error) {
-    console.error('❌ Erro inesperado no fluxo de envio de vídeo:', error);
-    mensagemretorno = 'Erro inesperado ao processar envio de vídeo';
+  if (!telnumberRaw || !videoPath) {
+    return res.status(400).send({
+      status: false,
+      message: 'telnumber e videoPath são obrigatórios',
+    });
   }
 
-  console.log('Retorno final:', { status: sucesso, message: mensagemretorno });
-  console.log('--- Fim da requisição /sendvideo ---');
+  // cria job e entra na fila
+  const jobId = enqueueVideoJob(sessionName, {
+    sessionName,
+    telnumber: telnumberRaw,
+    videoPath,
+    filename,
+    caption,
+  });
 
-  // 🔔 Notifica o webhook (não bloqueia a resposta, erro aqui só loga)
-  (async () => {
-    try {
-      await axios.post(WEBHOOK_URL, {
-        event: 'sent',
-        session: sessionName,
-        telnumber: telnumber, // apenas dígitos
-        message: {
-          type: 'video',
-          filename,
-          filePath: videoPath,
-          caption,
-        },
-        result: resultSend,
-        success: sucesso,
-      });
-    } catch (e) {
-      console.error(
-        '⚠️ Falha ao notificar webhook de envio de vídeo:',
-        e?.message || e
-      );
-    }
-  })();
+  console.log('📥 vídeo enfileirado', { sessionName, jobId });
 
-  res.send({ status: sucesso, message: mensagemretorno });
+  // responde já
+  return res.status(202).send({
+    status: true,
+    queued: true,
+    jobId,
+    message: 'Envio de vídeo enfileirado',
+  });
 });
 
 app.get('/:session/loadearlier', async function (req, res) {
@@ -2130,22 +2184,20 @@ app.post('/:session/download-media', async function (req, res) {
   }
 });
 
-// Inicia o servidor
-const porta = '3005';
-var server = app
-  .listen(porta, () => {
-    console.log('Servidor iniciado na porta %s', porta);
-  })
-  .on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(
-        `❌ Porta ${porta} já está em uso. Tente uma porta diferente ou mate o processo que está usando a porta.`
-      );
-      console.error(
-        'Para matar processos na porta 3003: pkill -f "node.*index.js"'
-      );
-    } else {
-      console.error('❌ Erro ao iniciar servidor:', err.message);
-    }
-    process.exit(1);
-  });
+const porta = 3005;
+const server = app.listen(porta, () => {
+  console.log(`Servidor iniciado na porta ${porta}`);
+});
+
+server.timeout = 600000;
+server.keepAliveTimeout = 650000;
+server.headersTimeout = 660000;
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`❌ Porta ${porta} já está em uso.`);
+  } else {
+    console.error('❌ Erro ao iniciar servidor:', err.message);
+  }
+  process.exit(1);
+});
