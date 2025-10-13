@@ -8,15 +8,17 @@ datasource db {
 }
 
 model User {
-  id                 String  @id @default(cuid())
-  name               String
-  email              String  @unique
-  phone              String
-  profession         String
-  password           String
-  googleAccessToken  String?
-  googleEmail        String?
-  googleRefreshToken String?
+  id                  String    @id @default(cuid())
+  name                String
+  email               String    @unique
+  phone               String
+  profession          String
+  password            String
+  googleAccessToken   String?
+  googleEmail         String?
+  googleRefreshToken  String?
+  resetPasswordExpiry DateTime?
+  resetPasswordToken  String?
 }
 
 model Company {
@@ -28,29 +30,56 @@ model Company {
 }
 
 model Team {
-  id                 String           @id @default(cuid())
-  name               String
-  email              String           @unique
-  position           String
-  password           String?
-  teamId             String?
-  googleAccessToken  String?          @db.Text
-  googleEmail        String?
-  googleRefreshToken String?          @db.Text
-  directorId         String?
-  leads              Lead[]           @relation("LeadCreator")
-  meetings           Meeting[]
-  proposals          Proposal[]       @relation("ProposalCreator")
-  team               TeamGroup?       @relation("TeamMember", fields: [teamId], references: [id])
-  managedTeams       TeamGroup[]      @relation("TeamManager")
-  permissions        TeamPermission[]
-
-  whatsappSessions   WhatsAppSession[]
-  segments Segment[]
+  id                  String            @id @default(cuid())
+  name                String
+  email               String            @unique
+  position            String
+  password            String?
+  teamId              String?
+  googleAccessToken   String?           @db.Text
+  googleEmail         String?
+  googleRefreshToken  String?           @db.Text
+  directorId          String?
+  avatarUrl           String?
+  address             String?
+  birthDate           String?
+  cnpj                String?
+  cpf                 String?           @default("")
+  phone               String?           @default("")
+  accessStatus        String?           @default("pending")
+  approvedAt          DateTime?
+  createdAt           DateTime?         @default(now())
+  requestedAt         DateTime?         @default(now())
+  updatedAt           DateTime?
+  resetPasswordExpiry DateTime?
+  resetPasswordToken  String?
+  companyAddress      String?
+  companyCnpj         String?
+  companyDescription  String?
+  companyEmail        String?
+  companyEmployees    String?
+  companyFounded      String?
+  companyLogo         String?
+  companyName         String?
+  companyPhone        String?
+  companyRevenue      String?
+  companySector       String?
+  companySize         String?
+  companyWebsite      String?
+  campaigns           Campaing[]
+  leads               Lead[]            @relation("LeadCreator")
+  meetings            Meeting[]
+  proposals           Proposal[]        @relation("ProposalCreator")
+  QuickReply          QuickReply[]
+  segments            Segment[]
+  team                TeamGroup?        @relation("TeamMember", fields: [teamId], references: [id])
+  managedTeams        TeamGroup[]       @relation("TeamManager")
+  permissions         TeamPermission[]
+  Template            Template[]
+  whatsappSessions    WhatsAppSession[]
 
   @@index([teamId], map: "Team_teamId_fkey")
   @@index([directorId], map: "Team_directorId_fkey")
-  campaigns Campaing[]
 }
 
 model TeamGroup {
@@ -83,20 +112,23 @@ model TeamPermission {
 }
 
 model Lead {
-  id             String     @id @default(cuid())
+  id             String       @id @default(cuid())
   name           String
-  email          String     @unique
+  email          String?
   phone          String
   ocupation      String
   potentialValue String
   observations   String
-  status         String     @default("novos_leads")
+  status         String       @default("novos_leads")
   product        String?
-  createdAt      DateTime   @default(now())
+  createdAt      DateTime     @default(now())
   createdBy      String?
-  updatedAt      DateTime?  @updatedAt
+  updatedAt      DateTime?    @updatedAt
+  deletedAt      DateTime?
   followups      Followup[]
-  creator        Team?      @relation("LeadCreator", fields: [createdBy], references: [id])
+  creator        Team?        @relation("LeadCreator", fields: [createdBy], references: [id])
+  LeadFile       LeadFile[]
+  Meeting        Meeting[]
   proposals      Proposal[]
   simulations    Simulation[]
 
@@ -139,41 +171,55 @@ model Proposal {
 }
 
 model Proponent {
-  id          String   @id @default(cuid())
-  name        String
-  cpf         String
-  email       String
-  phone       String
-  razaoSocial String?
-  proposalId  String
-  proposal    Proposal @relation(fields: [proposalId], references: [id])
+  id             String   @id @default(cuid())
+  name           String
+  cpf            String
+  email          String
+  phone          String
+  proposalId     String
+  razaoSocial    String?
+  bairro         String?
+  cep            String?
+  cidadeUf       String?
+  endereco       String?
+  nomeEmpresa    String?
+  cnpj           String?
+  dataNascimento String?
+  ocupacao       String?
+  rendaMensal    String?
+  proposal       Proposal @relation(fields: [proposalId], references: [id])
 
   @@index([proposalId], map: "Proponent_proposalId_fkey")
 }
 
 model Property {
-  id          String   @id @default(cuid())
-  address     String
-  value       String
-  description String?
-  proposalId  String
-  proposal    Proposal @relation(fields: [proposalId], references: [id])
+  id            String          @id @default(cuid())
+  address       String
+  value         String
+  description   String?
+  proposalId    String
+  creditValue   String?
+  neighborhood  String?
+  type          String?
+  zipCode       String?
+  proposal      Proposal        @relation(fields: [proposalId], references: [id])
+  PropertyOwner PropertyOwner[]
 
   @@index([proposalId], map: "Property_proposalId_fkey")
 }
 
 model ProposalFile {
-  id          String   @id @default(cuid())
-  url         String?  // Manter para compatibilidade com arquivos antigos
-  name        String
+  id           String   @id @default(cuid())
+  url          String?  @db.Text
+  name         String
+  proposalId   String
+  createdAt    DateTime @default(now())
+  documentType String?
+  fileData     Bytes?
+  mimeType     String?
   originalName String?
-  mimeType    String?
-  size        Int?
-  fileData    Bytes?   // Dados do arquivo em binário
-  documentType String? // Tipo do documento (ex: "identificacao", "holerite")
-  proposalId  String
-  createdAt   DateTime @default(now())
-  proposal    Proposal @relation(fields: [proposalId], references: [id])
+  size         Int?
+  proposal     Proposal @relation(fields: [proposalId], references: [id])
 
   @@index([proposalId], map: "ProposalFile_proposalId_fkey")
 }
@@ -193,11 +239,14 @@ model Meeting {
   googleEventId  String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  leadId         String?
+  Lead           Lead?    @relation(fields: [leadId], references: [id])
   organizer      Team     @relation(fields: [organizerEmail], references: [email])
 
   @@index([organizerEmail])
   @@index([startDateTime])
   @@index([googleEventId])
+  @@index([leadId])
 }
 
 model Followup {
@@ -224,8 +273,8 @@ model Simulation {
   createdAt           DateTime  @default(now())
   proposalId          String?
   leadId              String?
-  proposal            Proposal? @relation(fields: [proposalId], references: [id])
   lead                Lead?     @relation(fields: [leadId], references: [id])
+  proposal            Proposal? @relation(fields: [proposalId], references: [id])
 
   @@index([proposalId], map: "Simulation_proposalId_fkey")
   @@index([leadId], map: "Simulation_leadId_fkey")
@@ -253,21 +302,18 @@ model WhatsAppSession {
   lastConnected    DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
-  phoneNumber      String?          
-  formattedNumber  String?     
-
-  // Relacionamento com Team (user)
+  formattedNumber  String?
+  phoneNumber      String?
   userId           String?
-  user             Team?              @relation(fields: [userId], references: [id])
-
+  deletedAt        DateTime?
   contacts         WhatsAppContact[]
   messages         WhatsAppMessage[]
+  user             Team?             @relation(fields: [userId], references: [id])
 
   @@index([sessionName])
   @@index([isActive])
   @@index([userId])
 }
-
 
 model WhatsAppContact {
   id               String               @id @default(uuid())
@@ -282,6 +328,7 @@ model WhatsAppContact {
   lastMessageAt    DateTime?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
+  archived         Boolean              @default(false)
   session          WhatsAppSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   tags             WhatsAppContactTag[]
   messages         WhatsAppMessage[]
@@ -315,6 +362,7 @@ model WhatsAppMessage {
   author       String?
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
+  archived     Boolean          @default(false)
   contact      WhatsAppContact? @relation(fields: [contactId], references: [id])
   session      WhatsAppSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -352,102 +400,151 @@ model WhatsAppContactTag {
 }
 
 model Campaing {
-  id           String              @id @default(uuid())
+  id           String             @id @default(uuid())
   name         String
-  delay        Int                 @default(30000)
-  contactDelay Int                 @default(10000)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  userId String?
-   status       String              @default("active") 
-  user   Team? @relation(fields: [userId], references: [id])
-
+  delay        Int                @default(30000)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  contactDelay Int                @default(10000)
+  userId       String?
+  status       String             @default("active")
+  deletedAt    DateTime?
+  user         Team?              @relation(fields: [userId], references: [id])
   templates    CampaingTemplate[]
+
+  @@index([userId], map: "Campaing_userId_fkey")
 }
 
 model Template {
-  id        String              @id @default(uuid())
+  id        String             @id @default(uuid())
   name      String
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
-
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  deletedAt DateTime?
+  userId    String?
   campaings CampaingTemplate[]
+  Team      Team?              @relation(fields: [userId], references: [id])
   messages  TemplateMessage[]
+
+  @@index([userId], map: "Template_userId_fkey")
 }
 
 model TemplateMessage {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   text        String?   @db.Text
   audioUrl    String?   @db.Text
   imageUrl    String?   @db.Text
-  videoUrl    String?   @db.Text
   documentUrl String?   @db.Text
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   templateId  String
-  template    Template @relation(fields: [templateId], references: [id])
+  videoUrl    String?   @db.Text
+  deletedAt   DateTime?
+  template    Template  @relation(fields: [templateId], references: [id])
+
+  @@index([templateId], map: "TemplateMessage_templateId_fkey")
 }
 
 model CampaingTemplate {
   campaingId String
   templateId String
-
   campaing   Campaing @relation(fields: [campaingId], references: [id])
   template   Template @relation(fields: [templateId], references: [id])
 
-  @@id([campaingId, templateId]) // Chave composta primária
+  @@id([campaingId, templateId])
+  @@index([templateId], map: "CampaingTemplate_templateId_fkey")
 }
-//
 
 model KbMessage {
   id        String   @id @default(cuid())
   userId    String
   question  String
   answer    String   @db.Text
-  citations Json?    // ← array de objetos { file_id, quote }
+  citations Json?
   createdAt DateTime @default(now())
 
-  @@index([userId, createdAt(desc)])
+  @@index([userId, createdAt])
 }
+
 model Segment {
-  id          String            @id @default(cuid())
+  id          String           @id @default(cuid())
   name        String
   description String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-
-  // Dono do segmento
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
   userId      String
-  user        Team              @relation(fields: [userId], references: [id])
-
+  deletedAt   DateTime?
+  user        Team             @relation(fields: [userId], references: [id])
   contacts    SegmentContact[]
+
+  @@index([userId], map: "Segment_userId_fkey")
 }
 
 model SegmentContact {
-  id          String   @id @default(cuid())
-  segmentId   String
-  segment     Segment  @relation(fields: [segmentId], references: [id])
+  id        String  @id @default(cuid())
+  segmentId String
+  name      String?
+  phone     String
+  email     String?
+  empresa   String?
+  extraData Json?
+  segment   Segment @relation(fields: [segmentId], references: [id])
 
-  name        String?
-  phone       String
-  email       String?
-  empresa     String?
-  extraData   Json?     // flexível para armazenar colunas extras do Excel
+  @@index([segmentId], map: "SegmentContact_segmentId_fkey")
 }
 
 model CampaignDispatch {
-  id             String   @id @default(uuid())
-  campaignId     String
-  sessionName    String
-  contact        String
-  message        String   @db.Text
-  status         String   @default("pending")
-  error          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id           String    @id @default(uuid())
+  campaignId   String
+  sessionName  String
+  contact      String
+  message      String    @db.Text
+  status       String    @default("pending")
+  error        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  messageOrder Int?
+  scheduledAt  DateTime?
+  deletedAt    DateTime?
+}
 
-  // 👇 nova coluna: ordem da mensagem (baseada no TemplateMessage.createdAt)
-  messageOrder   Int?
-  scheduledAt    DateTime?
+model LeadFile {
+  id           String   @id
+  url          String?  @db.Text
+  name         String
+  leadId       String
+  createdAt    DateTime @default(now())
+  documentType String?
+  fileData     Bytes?
+  mimeType     String?
+  originalName String?
+  size         Int?
+  Lead         Lead     @relation(fields: [leadId], references: [id])
+
+  @@index([leadId], map: "LeadFile_leadId_fkey")
+}
+
+model PropertyOwner {
+  id         String    @id
+  name       String
+  propertyId String?
+  Property   Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([propertyId])
+}
+
+model QuickReply {
+  id          String   @id
+  userId      String
+  title       String
+  content     String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  audioUrl    String?  @db.Text
+  documentUrl String?  @db.Text
+  imageUrl    String?  @db.Text
+  videoUrl    String?  @db.Text
+  Team        Team     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
