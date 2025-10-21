@@ -1,6 +1,7 @@
 // workers/campaignWorker.js
 const { PrismaClient } = require('@prisma/client');
 const axios = require('axios');
+const { DateTime } = require('luxon');
 
 const prisma = new PrismaClient();
 
@@ -42,6 +43,35 @@ function renderTemplate(text, contactData) {
   });
 }
 
+/**
+ * Converte horário UTC para horário do Brasil (America/Sao_Paulo)
+ * @param {Date|string} utcDate - Data/hora em UTC
+ * @returns {Date} - Data/hora convertida para o horário do Brasil
+ */
+function convertUTCToBrazilTime(utcDate) {
+  if (!utcDate) return new Date();
+
+  // Converte para DateTime do Luxon em UTC
+  const utcDateTime = DateTime.fromJSDate(
+    utcDate instanceof Date ? utcDate : new Date(utcDate),
+    { zone: 'utc' }
+  );
+
+  // Converte para horário do Brasil
+  const brazilDateTime = utcDateTime.setZone('America/Sao_Paulo');
+
+  // Retorna como Date JavaScript
+  return brazilDateTime.toJSDate();
+}
+
+/**
+ * Obtém a data/hora atual no horário do Brasil
+ * @returns {Date} - Data/hora atual no horário do Brasil
+ */
+function getCurrentBrazilTime() {
+  return DateTime.now().setZone('America/Sao_Paulo').toJSDate();
+}
+
 // Revive mensagens “presas” em processing há muito tempo
 async function reviveStuckProcessing() {
   try {
@@ -70,7 +100,8 @@ async function reviveStuckProcessing() {
  * Em corrida, se outro worker atualizar antes, o updateMany aqui vai retornar 0 e voltamos null.
  */
 async function claimNextContactBatch(campaignId) {
-  const now = new Date();
+  // Usa horário do Brasil para comparações
+  const now = getCurrentBrazilTime();
 
   return prisma.$transaction(
     async (tx) => {
@@ -78,7 +109,14 @@ async function claimNextContactBatch(campaignId) {
         where: {
           campaignId,
           status: 'pending',
-          OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+          OR: [
+            { scheduledAt: null },
+            {
+              scheduledAt: {
+                lte: now, // Agora compara com horário do Brasil
+              },
+            },
+          ],
         },
         orderBy: [
           { contact: 'asc' },
@@ -89,7 +127,7 @@ async function claimNextContactBatch(campaignId) {
 
       if (!first) return null;
 
-      const claimTime = new Date();
+      const claimTime = getCurrentBrazilTime();
 
       const upd = await tx.campaignDispatch.updateMany({
         where: {
@@ -97,9 +135,16 @@ async function claimNextContactBatch(campaignId) {
           contact: first.contact,
           sessionName: first.sessionName,
           status: 'pending',
-          OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+          OR: [
+            { scheduledAt: null },
+            {
+              scheduledAt: {
+                lte: now, // Agora compara com horário do Brasil
+              },
+            },
+          ],
         },
-        data: { status: 'processing', updatedAt: new Date() },
+        data: { status: 'processing', updatedAt: getCurrentBrazilTime() },
       });
 
       if (upd.count === 0) {
@@ -191,8 +236,11 @@ async function processCampaign(campaignId) {
       const { contact, contactData, batch } = claim;
       const cleanNumber = String(contact).replace(/[^\d]/g, '');
 
+      const currentBrazilTime = DateTime.now()
+        .setZone('America/Sao_Paulo')
+        .toFormat('dd/MM/yyyy HH:mm:ss');
       console.log(
-        `📦 [${campaignId}] Processando ${batch.length} mensagens do contato ${cleanNumber}`
+        `📦 [${campaignId}] Processando ${batch.length} mensagens do contato ${cleanNumber} (Horário Brasil: ${currentBrazilTime})`
       );
 
       for (const dispatch of batch) {
@@ -326,11 +374,25 @@ async function orchestrate() {
   await reviveStuckProcessing();
 
   try {
-    const now = new Date();
+    // Usa horário do Brasil para comparações
+    const now = getCurrentBrazilTime();
+    const currentBrazilTime = DateTime.now()
+      .setZone('America/Sao_Paulo')
+      .toFormat('dd/MM/yyyy HH:mm:ss');
+    console.log(
+      `🕐 Orquestrador executando - Horário Brasil: ${currentBrazilTime}`
+    );
     const rows = await prisma.campaignDispatch.findMany({
       where: {
         status: 'pending',
-        OR: [{ scheduledAt: null }, { scheduledAt: { lte: now } }],
+        OR: [
+          { scheduledAt: null },
+          {
+            scheduledAt: {
+              lte: now, // Agora compara com horário do Brasil
+            },
+          },
+        ],
       },
       select: { campaignId: true },
       distinct: ['campaignId'],

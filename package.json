@@ -113,6 +113,7 @@
     "latest-version": "^5.1.0",
     "logform": "^2.7.0",
     "lookpath": "^1.2.3",
+    "luxon": "^3.7.2",
     "mime-types": "^2.1.35",
     "prisma": "^6.15.0",
     "puppeteer": "^24.14.0",
