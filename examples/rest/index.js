@@ -268,7 +268,6 @@ async function createSessionInBackground(sessionName) {
       debug: false,
       logQR: true,
 
-      // ⚠️ use apenas browserArgs (não duplique args)
       browserArgs: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -294,8 +293,8 @@ async function createSessionInBackground(sessionName) {
         executablePath,
       },
 
-      // ❗ EVITA QUE O NAVEGADOR FECHE SOZINHO
-      autoClose: 0,
+      // 👇 **AQUI**
+      autoClose: 0, // 0 = nunca fechar automaticamente
 
       tokenStore: 'file',
       folderNameToken: './tokens',
