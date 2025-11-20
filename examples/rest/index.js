@@ -261,48 +261,42 @@ async function createSessionInBackground(sessionName) {
           message: `Status: ${statusSession}`,
         };
       },
+
       headless: true,
       devtools: false,
-      // 🚫 NÃO use o Chrome do sistema
       useChrome: false,
       debug: false,
       logQR: true,
-      browserWS: '',
+
+      // ⚠️ use apenas browserArgs (não duplique args)
       browserArgs: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
         '--disable-gpu',
+        '--disable-extensions',
+        '--disable-dev-shm-usage',
+        '--no-zygote',
+        '--single-process',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-translate',
         '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
         '--disable-features=TranslateUI',
         '--disable-ipc-flooding-protection',
         '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
       ],
+
       puppeteerOptions: {
-        executablePath, // 👈 caminho do Chromium do Puppeteer
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
-          '--disable-features=TranslateUI',
-          '--disable-ipc-flooding-protection',
-        ],
+        executablePath,
       },
-      disableWelcome: false,
-      updatesLog: true,
-      autoClose: 240000,
+
+      // ❗ EVITA QUE O NAVEGADOR FECHE SOZINHO
+      autoClose: 0,
+
       tokenStore: 'file',
       folderNameToken: './tokens',
     });
@@ -794,8 +788,8 @@ app.post('/:session/createsession', async function (req, res) {
       const profile = await instancias[sessionName].getNumberProfile(wid);
 
       meInfo = {
-        wid: wid, // ex: 5511999999999@c.us
-        id: wid.replace('@c.us', ''), // ex: 5511999999999
+        wid: wid,
+        id: wid.replace('@c.us', ''),
       };
       return res.send({
         status: true,
