@@ -265,7 +265,7 @@ async function createSessionInBackground(sessionName) {
       headless: true,
       devtools: false,
       useChrome: false,
-      debug: false,
+      debug: true,
       logQR: true,
 
       browserArgs: [
