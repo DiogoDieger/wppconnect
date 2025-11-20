@@ -294,7 +294,7 @@ async function createSessionInBackground(sessionName) {
       },
 
       // 👇 **AQUI**
-      autoClose: 0, // 0 = nunca fechar automaticamente
+      autoClose: false, // 0 = nunca fechar automaticamente
 
       tokenStore: 'file',
       folderNameToken: './tokens',
@@ -482,7 +482,9 @@ async function getOrCreateSession(sessionName) {
       },
       disableWelcome: false,
       updatesLog: true,
-      autoClose: 0,
+      autoClose: false,
+      waitForLogin: true,
+
       tokenStore: 'file',
       folderNameToken: './tokens',
     });
