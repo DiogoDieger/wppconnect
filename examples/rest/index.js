@@ -264,38 +264,33 @@ async function createSessionInBackground(sessionName) {
 
       headless: true,
       devtools: false,
-      useChrome: false,
       debug: true,
       logQR: true,
 
-      browserArgs: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-extensions',
-        '--disable-dev-shm-usage',
-        '--no-zygote',
-        '--single-process',
-        '--disable-background-networking',
-        '--disable-default-apps',
-        '--disable-sync',
-        '--disable-translate',
-        '--disable-background-timer-throttling',
-        '--disable-renderer-backgrounding',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
-      ],
+      useChrome: true,
+      browserArgs: [], // deixa vazio pra não conflitar
 
       puppeteerOptions: {
-        executablePath,
+        executablePath: '/usr/bin/google-chrome',
+        headless: true,
+        args: [
+          '--headless=old', // 👈 força headless antigo
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-default-apps',
+          '--disable-sync',
+          '--disable-translate',
+          '--disable-features=TranslateUI',
+          '--window-size=1280,800',
+          `--user-data-dir=${path.join(__dirname, 'tokens', sessionName)}`,
+        ],
       },
 
-      // 👇 **AQUI**
-      autoClose: false, // 0 = nunca fechar automaticamente
-
+      autoClose: false, // nunca fecha sozinho
       tokenStore: 'file',
       folderNameToken: './tokens',
     });
