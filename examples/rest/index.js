@@ -274,7 +274,7 @@ async function createSessionInBackground(sessionName) {
         executablePath: '/usr/bin/google-chrome',
         headless: true,
         args: [
-          '--headless=old', // 👈 força headless antigo
+          // 👈 força headless antigo
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
