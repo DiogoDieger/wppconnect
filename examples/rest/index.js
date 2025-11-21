@@ -441,49 +441,41 @@ async function getOrCreateSession(sessionName) {
     client = await wppconnect.create({
       session: sessionName,
       catchQR,
-      statusFind: (statusSession, session) => {},
+      statusFind: (statusSession, session) => {
+        sessionStatus[sessionName] = {
+          status: 'QR_CODE',
+          message: `Status: ${statusSession}`,
+        };
+      },
+
       headless: true,
       devtools: false,
-      useChrome: false, // 👈 evita Chrome do sistema
-      debug: false,
+      debug: true,
       logQR: true,
-      browserWS: '',
-      browserArgs: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection',
-        '--user-data-dir=' + path.join(__dirname, 'tokens', sessionName),
-      ],
+
+      useChrome: true,
+      browserArgs: [], // deixa vazio pra não conflitar
+
       puppeteerOptions: {
-        executablePath, // 👈 usa Chromium do Puppeteer
+        executablePath: '/usr/bin/google-chrome',
+        headless: true,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
           '--disable-gpu',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
+          '--disable-extensions',
+          '--disable-background-networking',
+          '--disable-default-apps',
+          '--disable-sync',
+          '--disable-translate',
           '--disable-features=TranslateUI',
-          '--disable-ipc-flooding-protection',
+          '--window-size=1280,800',
+          `--user-data-dir=${path.join(__dirname, 'tokens', sessionName)}`,
         ],
       },
-      disableWelcome: false,
-      updatesLog: true,
-      autoClose: false,
-      waitForLogin: true,
+
+      autoClose: 0, // nunca fecha automático
 
       tokenStore: 'file',
       folderNameToken: './tokens',
