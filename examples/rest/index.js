@@ -273,6 +273,7 @@ async function createSessionInBackground(sessionName) {
       puppeteerOptions: {
         executablePath: '/usr/bin/google-chrome',
         headless: true,
+        dumpio: true,
         args: [
           // 👈 força headless antigo
           '--no-sandbox',
