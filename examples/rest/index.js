@@ -1,7 +1,7 @@
 const express = require('express');
 const app = express();
 const wppconnect = require('@wppconnect-team/wppconnect');
-const WEBHOOK_URL = 'https://crm.drzeuscapital.com.br/api/whatsappwebhook'; // substitua pela sua!
+const WEBHOOK_URL = 'https://www.trianguloempresa.com/api/whatsappwebhook'; // substitua pela sua!
 const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
@@ -374,6 +374,7 @@ async function createSessionInBackground(sessionName) {
           };
         }
       }
+      console.log('log para debug');
       const chatId =
         message.chatId || (message.fromMe ? message.to : message.from);
       processedMessage.chatId = chatId;
@@ -1037,8 +1038,11 @@ app.post('/:session/sendmessage', async function (req, res) {
   const sessionName = req.params.session;
   const telnumber = req.body.telnumber;
   const mensagemparaenvio = req.body.message;
+  console.log('antes do getorcreatesession');
 
   const client = await getOrCreateSession(sessionName);
+
+  console.log('depois do getorcreatesession');
 
   if (!client) {
     return res.status(404).send({
